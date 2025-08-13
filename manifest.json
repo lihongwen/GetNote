@@ -1,0 +1,10 @@
+{
+	"id": "getnote-plugin",
+	"name": "GetNote - AI语音笔记",
+	"version": "1.0.0",
+	"minAppVersion": "0.15.0",
+	"description": "使用AI将语音转换为结构化笔记，支持阿里云百炼语音理解模型",
+	"author": "lihongwen",
+	"authorUrl": "",
+	"isDesktopOnly": false
+}
