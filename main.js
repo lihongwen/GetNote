@@ -380,39 +380,23 @@ var NoteGenerator = class {
    * 生成笔记内容
    */
   generateNoteContent(aiResponse, metadata, includeMetadata = true) {
-    const { title, timestamp, duration, audioSize, processingTime, model } = metadata;
+    const { title, timestamp, duration, model } = metadata;
     let content = "";
     content += `# ${title}
 
 `;
     if (includeMetadata) {
-      content += "## \u{1F4DD} \u7B14\u8BB0\u4FE1\u606F\n\n";
-      content += `- **\u521B\u5EFA\u65F6\u95F4**: ${timestamp.toLocaleString()}
-`;
+      content += `\u521B\u5EFA\u65F6\u95F4: ${timestamp.toLocaleString()}`;
       if (duration) {
-        content += `- **\u5F55\u97F3\u65F6\u957F**: ${duration}
-`;
+        content += ` | \u65F6\u957F: ${duration}`;
       }
-      if (audioSize) {
-        content += `- **\u97F3\u9891\u5927\u5C0F**: ${audioSize}
-`;
-      }
-      if (processingTime) {
-        content += `- **\u5904\u7406\u65F6\u957F**: ${processingTime}
-`;
-      }
-      content += `- **AI\u6A21\u578B**: ${model}
+      content += ` | ${model}
 
 `;
     }
-    content += "---\n\n";
-    content += "## \u{1F4C4} \u7B14\u8BB0\u5185\u5BB9\n\n";
     content += this.formatAIResponse(aiResponse);
     content += "\n\n";
-    content += "## \u{1F3F7}\uFE0F \u6807\u7B7E\n\n";
-    content += "#\u8BED\u97F3\u7B14\u8BB0 #AI\u751F\u6210\n\n";
-    content += "---\n";
-    content += "*\u7531 GetNote \u63D2\u4EF6\u81EA\u52A8\u751F\u6210*\n";
+    content += "#\u8BED\u97F3\u7B14\u8BB0\n";
     return content;
   }
   /**
@@ -541,61 +525,45 @@ var NoteGenerator = class {
     const templates = {
       meeting: `# \u4F1A\u8BAE\u7B14\u8BB0
 
-## \u{1F4C5} \u4F1A\u8BAE\u4FE1\u606F
-- **\u65F6\u95F4**: 
-- **\u53C2\u4E0E\u8005**: 
-- **\u8BAE\u9898**: 
+\u65F6\u95F4: 
+\u53C2\u4E0E\u8005: 
+\u8BAE\u9898: 
 
-## \u{1F4DD} \u4F1A\u8BAE\u5185\u5BB9
+## \u5185\u5BB9
 
-## \u2705 \u51B3\u5B9A\u4E8B\u9879
+## \u51B3\u5B9A
 
-## \u{1F4CB} \u5F85\u529E\u4E8B\u9879
+## \u5F85\u529E
 
-## \u{1F4CE} \u76F8\u5173\u8D44\u6E90
-
----
-*\u7531 GetNote \u63D2\u4EF6\u751F\u6210*`,
-      idea: `# \u{1F4A1} \u521B\u610F\u60F3\u6CD5
+`,
+      idea: `# \u521B\u610F\u60F3\u6CD5
 
 ## \u6838\u5FC3\u60F3\u6CD5
 
 ## \u8BE6\u7EC6\u63CF\u8FF0
 
-## \u53EF\u884C\u6027\u5206\u6790
+## \u4E0B\u4E00\u6B65
 
-## \u4E0B\u4E00\u6B65\u884C\u52A8
+`,
+      todo: `# \u5F85\u529E
 
-## \u76F8\u5173\u8D44\u6E90
-
----
-*\u7531 GetNote \u63D2\u4EF6\u751F\u6210*`,
-      todo: `# \u{1F4CB} \u5F85\u529E\u6E05\u5355
-
-## \u7D27\u6025\u91CD\u8981
+## \u7D27\u6025
 - [ ] 
 
-## \u91CD\u8981\u4E0D\u7D27\u6025
-- [ ] 
-
-## \u7D27\u6025\u4E0D\u91CD\u8981
+## \u91CD\u8981
 - [ ] 
 
 ## \u5176\u4ED6
 - [ ] 
 
----
-*\u7531 GetNote \u63D2\u4EF6\u751F\u6210*`,
+`,
       general: `# \u8BED\u97F3\u7B14\u8BB0
 
-## \u4E3B\u8981\u5185\u5BB9
+## \u5185\u5BB9
 
-## \u5173\u952E\u70B9
+## \u8981\u70B9
 
-## \u8865\u5145\u8BF4\u660E
-
----
-*\u7531 GetNote \u63D2\u4EF6\u751F\u6210*`
+`
     };
     return templates[templateType];
   }

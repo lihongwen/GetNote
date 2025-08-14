@@ -20,48 +20,28 @@ export class NoteGenerator {
         metadata: NoteMetadata,
         includeMetadata: boolean = true
     ): string {
-        const { title, timestamp, duration, audioSize, processingTime, model } = metadata;
+        const { title, timestamp, duration, model } = metadata;
         
         let content = '';
 
         // 添加标题
         content += `# ${title}\n\n`;
 
-        // 添加元数据部分
+        // 简化的元数据（可选）
         if (includeMetadata) {
-            content += '## 📝 笔记信息\n\n';
-            content += `- **创建时间**: ${timestamp.toLocaleString()}\n`;
-            
+            content += `创建时间: ${timestamp.toLocaleString()}`;
             if (duration) {
-                content += `- **录音时长**: ${duration}\n`;
+                content += ` | 时长: ${duration}`;
             }
-            
-            if (audioSize) {
-                content += `- **音频大小**: ${audioSize}\n`;
-            }
-            
-            if (processingTime) {
-                content += `- **处理时长**: ${processingTime}\n`;
-            }
-            
-            content += `- **AI模型**: ${model}\n\n`;
+            content += ` | ${model}\n\n`;
         }
 
-        // 添加分隔线
-        content += '---\n\n';
-
-        // 添加AI生成的内容
-        content += '## 📄 笔记内容\n\n';
+        // 添加内容（无多余格式）
         content += this.formatAIResponse(aiResponse);
         content += '\n\n';
 
-        // 添加标签部分
-        content += '## 🏷️ 标签\n\n';
-        content += '#语音笔记 #AI生成\n\n';
-
-        // 添加脚注
-        content += '---\n';
-        content += '*由 GetNote 插件自动生成*\n';
+        // 简单标签
+        content += '#语音笔记\n';
 
         return content;
     }
@@ -236,64 +216,48 @@ export class NoteGenerator {
         const templates = {
             meeting: `# 会议笔记
 
-## 📅 会议信息
-- **时间**: 
-- **参与者**: 
-- **议题**: 
+时间: 
+参与者: 
+议题: 
 
-## 📝 会议内容
+## 内容
 
-## ✅ 决定事项
+## 决定
 
-## 📋 待办事项
+## 待办
 
-## 📎 相关资源
+`,
 
----
-*由 GetNote 插件生成*`,
-
-            idea: `# 💡 创意想法
+            idea: `# 创意想法
 
 ## 核心想法
 
 ## 详细描述
 
-## 可行性分析
+## 下一步
 
-## 下一步行动
+`,
 
-## 相关资源
+            todo: `# 待办
 
----
-*由 GetNote 插件生成*`,
-
-            todo: `# 📋 待办清单
-
-## 紧急重要
+## 紧急
 - [ ] 
 
-## 重要不紧急
-- [ ] 
-
-## 紧急不重要
+## 重要
 - [ ] 
 
 ## 其他
 - [ ] 
 
----
-*由 GetNote 插件生成*`,
+`,
 
             general: `# 语音笔记
 
-## 主要内容
+## 内容
 
-## 关键点
+## 要点
 
-## 补充说明
-
----
-*由 GetNote 插件生成*`
+`
         };
 
         return templates[templateType];
