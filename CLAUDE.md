@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is an Obsidian plugin project named "getnote-plugin" that converts voice input into transcribed text using AI. The plugin uses Alibaba Cloud's DashScope API with the qwen-audio-asr-latest model for accurate audio-to-text transcription.
 
-### Current Status (Phase 1 Complete ✅)
+### Current Status (Phase 2 Complete ✅)
 - ✅ Basic plugin structure implemented
 - ✅ Audio recording functionality using Web Audio API
 - ✅ DashScope API integration with proper authentication
@@ -15,6 +15,10 @@ This is an Obsidian plugin project named "getnote-plugin" that converts voice in
 - ✅ Plugin settings UI with API key configuration and testing
 - ✅ Modular architecture with separate components
 - ✅ Git repository initialized with first commit
+- ✅ Upgraded to qwen-audio-asr-latest model for precise transcription
+- ✅ Complete recording UI with start/pause/stop controls
+- ✅ Modern, beautiful interface design with animations
+- ✅ Real-time recording status and time display
 
 ### Key Features
 - 🎙️ **Voice Recording**: Uses MediaRecorder API with configurable quality settings
@@ -23,6 +27,10 @@ This is an Obsidian plugin project named "getnote-plugin" that converts voice in
 - ⚙️ **Settings UI**: API key management, model selection, output configuration
 - 📁 **Organization**: Automatic saving to configurable vault folders
 - 🎯 **Simple Format**: Clean text transcription with metadata
+- 🎨 **Modern UI**: Beautiful recording modal with start/pause/stop controls
+- ⏱️ **Real-time Display**: Live recording time and status indicators
+- 🎭 **Animations**: Smooth status transitions and visual feedback
+- 📱 **Responsive Design**: Optimized for both desktop and mobile devices
 
 ## Technical Requirements
 
@@ -147,31 +155,38 @@ Common plugin features:
 ├── data.json           # Plugin settings storage
 ├── src/
 │   ├── api-client.ts    # DashScope API integration
-│   ├── recorder.ts      # Audio recording functionality
+│   ├── recorder.ts      # Audio recording functionality (with pause/resume)
 │   ├── note-generator.ts # Note creation and formatting
-│   └── settings.ts      # Plugin settings UI
-└── styles.css          # Optional plugin styles
+│   ├── settings.ts      # Plugin settings UI
+│   └── recording-modal.ts # Recording control UI interface
+└── styles.css          # Modern UI styles with animations
 ```
 
 ## Architecture Components
 
 ### Main Plugin (`main.ts`)
 - Extends Obsidian's Plugin class
-- Integrates all components (recorder, API client, note generator)
+- Integrates all components (recorder, API client, note generator, UI modal)
 - Manages plugin lifecycle and commands
-- Handles ribbon icons and status bar items
+- Handles ribbon icons and recording modal
 
 ### API Client (`src/api-client.ts`)
-- DashScope API integration with proper request format
-- Audio processing and base64 encoding
+- DashScope API integration with qwen-audio-asr-latest model
+- Simplified audio processing and base64 encoding
 - Error handling and connection testing
 - Support for multiple audio formats
 
 ### Audio Recorder (`src/recorder.ts`)
-- Web Audio API integration
+- Web Audio API integration with pause/resume support
 - MediaRecorder with configurable quality
 - Permission handling and format detection
-- Real-time recording status updates
+- Real-time recording status and duration tracking
+
+### Recording Modal (`src/recording-modal.ts`)
+- Modern UI interface with start/pause/stop controls
+- Real-time recording status indicators
+- Live time display with accurate duration calculation
+- State management for recording workflow
 
 ### Note Generator (`src/note-generator.ts`)
 - Structured markdown note creation
@@ -182,8 +197,32 @@ Common plugin features:
 ### Settings UI (`src/settings.ts`)
 - API key configuration and validation
 - Audio quality and duration settings
-- Template and output folder configuration
-- Export/import settings functionality
+- Model selection (qwen-audio-asr variants)
+- Output folder configuration
+
+## UI Design Features
+
+### Recording Modal Interface
+- **Modern Design**: Gradient backgrounds, rounded corners, and glass-morphism effects
+- **Status Indicators**: Color-coded circular indicators with smooth animations
+  - 🔘 Gray: Idle state
+  - 🔴 Red pulsing: Recording active
+  - 🟡 Orange blinking: Paused state
+  - 🔵 Blue spinning: Processing
+- **Interactive Controls**: Three main buttons with hover effects and disabled states
+- **Time Display**: Large, monospace font with real-time updates
+- **Responsive Layout**: Adapts to mobile and desktop screens
+
+### Animation System
+- **Pulse Effects**: Status indicators have contextual animations
+- **Hover States**: Buttons lift and glow on interaction
+- **Smooth Transitions**: All state changes are animated
+- **Accessibility**: Respects `prefers-reduced-motion` setting
+
+### Theme Support
+- **Dark/Light Modes**: Automatically adapts to Obsidian themes
+- **High Contrast**: Enhanced visibility for accessibility
+- **Custom Variables**: Uses Obsidian's CSS custom properties
 
 ## Key Dependencies
 
@@ -201,13 +240,20 @@ Common plugin features:
 - [x] DashScope API format matches official documentation
 - [x] CORS issues resolved with requestUrl() method
 
-### Phase 2 Testing (Next Steps)
-- [ ] Audio recording functionality
-- [ ] Complete audio-to-text workflow
-- [ ] Note generation and saving to vault
-- [ ] Template system validation
-- [ ] Mobile device compatibility
-- [ ] Error handling edge cases
+### Phase 2 Testing (Completed ✅)
+- [x] Audio recording functionality with pause/resume
+- [x] Complete audio-to-text workflow
+- [x] Note generation and saving to vault
+- [x] Modern UI interface design
+- [x] Mobile device compatibility
+- [x] Error handling edge cases
+
+### Phase 3 Testing (Future Enhancement)
+- [ ] Advanced note templates
+- [ ] Batch audio processing
+- [ ] Export/import settings functionality
+- [ ] Performance optimization for long recordings
+- [ ] Plugin marketplace submission
 
 ### Common Issues and Solutions
 
