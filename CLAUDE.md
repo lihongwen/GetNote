@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is an Obsidian plugin project named "getnote-plugin" that converts voice input into transcribed text using AI. The plugin uses Alibaba Cloud's DashScope API with the qwen-audio-asr-latest model for accurate audio-to-text transcription.
 
-### Current Status (Phase 2 Complete ✅)
+### Current Status (Phase 3 Complete ✅)
 - ✅ Basic plugin structure implemented
 - ✅ Audio recording functionality using Web Audio API
 - ✅ DashScope API integration with proper authentication
@@ -19,6 +19,11 @@ This is an Obsidian plugin project named "getnote-plugin" that converts voice in
 - ✅ Complete recording UI with start/pause/stop controls
 - ✅ Modern, beautiful interface design with animations
 - ✅ Real-time recording status and time display
+- ✅ **NEW**: State machine-driven UI with single primary button design
+- ✅ **NEW**: CSS design token system for consistent theming
+- ✅ **NEW**: Information band with level meter and progress indicators
+- ✅ **NEW**: Stop recording confirmation dialog
+- ✅ **NEW**: Enhanced error state handling and retry functionality
 
 ### Key Features
 - 🎙️ **Voice Recording**: Uses MediaRecorder API with configurable quality settings
@@ -202,16 +207,21 @@ Common plugin features:
 
 ## UI Design Features
 
-### Recording Modal Interface
-- **Modern Design**: Gradient backgrounds, rounded corners, and glass-morphism effects
-- **Status Indicators**: Color-coded circular indicators with smooth animations
+### Recording Modal Interface (Phase 3 - State Machine Design)
+- **Modern Design**: Gradient backgrounds, rounded corners, and glass-morphism effects based on CSS design tokens
+- **Status Bar**: Unified status indicator with contextual text (replaced胶囊状态显示)
   - 🔘 Gray: Idle state
-  - 🔴 Red pulsing: Recording active
+  - 🔴 Red pulsing: Recording active  
   - 🟡 Orange blinking: Paused state
   - 🔵 Blue spinning: Processing
-- **Interactive Controls**: Three main buttons with hover effects and disabled states
-- **Time Display**: Large, monospace font with real-time updates
-- **Responsive Layout**: Adapts to mobile and desktop screens
+  - 🔴 Red: Error state
+- **Single Primary Button Design**: Main action button changes based on state (start/pause/resume/retry)
+- **Secondary Button**: Context-aware secondary actions (import/stop/cancel)
+- **Information Band**: Real-time level meter and progress indication during recording
+- **Time Display**: Large, monospace font with optional colon blinking and dimming effects
+- **Confirmation Dialog**: Stop recording requires user confirmation to prevent accidental data loss
+- **State Machine Logic**: Five distinct states (idle/recording/paused/processing/error) drive all UI behavior
+- **Responsive Layout**: Adapts to mobile and desktop screens with optimized touch targets
 
 ### Animation System
 - **Pulse Effects**: Status indicators have contextual animations

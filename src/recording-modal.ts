@@ -1,20 +1,22 @@
 import { Modal, App, ButtonComponent, Notice } from 'obsidian';
 import { AudioRecorder } from './recorder';
 
-export type RecordingState = 'idle' | 'recording' | 'paused' | 'processing';
+export type RecordingState = 'idle' | 'recording' | 'paused';
 
 export class RecordingModal extends Modal {
     private audioRecorder: AudioRecorder | null = null;
     private state: RecordingState = 'idle';
     private timerInterval: number | null = null;
     
-    // UI Elements
-    private statusIndicator: HTMLElement;
+    // UI Elements - 简化设计
+    private statusContainer: HTMLElement;
+    private statusDot: HTMLElement;
+    private statusText: HTMLElement;
     private timeDisplay: HTMLElement;
     private startButton: ButtonComponent;
     private pauseButton: ButtonComponent;
     private stopButton: ButtonComponent;
-    private statusText: HTMLElement;
+    private hintText: HTMLElement;
     
     // Callbacks
     private onRecordingComplete: (audioBlob: Blob) => Promise<void>;
@@ -34,60 +36,58 @@ export class RecordingModal extends Modal {
         const { contentEl } = this;
         contentEl.empty();
         
-        // 设置Modal标题和样式
+        // 设置Modal样式
         contentEl.addClass('recording-modal');
         
         // 创建主容器
-        const container = contentEl.createDiv('recording-container');
+        const container = contentEl.createDiv('simple-recording-container');
         
         // 标题
         const title = container.createEl('h2', { text: '🎙️ 语音录制' });
-        title.addClass('recording-title');
+        title.addClass('simple-recording-title');
         
-        // 状态指示器容器
-        const statusContainer = container.createDiv('status-container');
-        
-        // 录音状态指示器（圆形指示灯）
-        this.statusIndicator = statusContainer.createDiv('status-indicator');
-        this.statusIndicator.addClass('status-idle');
-        
-        // 状态文本
-        this.statusText = statusContainer.createEl('div', { text: '准备录音' });
+        // 状态指示器
+        this.statusContainer = container.createDiv('simple-status');
+        this.statusContainer.addClass('status-idle');
+        this.statusDot = this.statusContainer.createDiv('status-dot');
+        this.statusText = this.statusContainer.createEl('span', { text: '准备录音' });
         this.statusText.addClass('status-text');
         
         // 时间显示
         this.timeDisplay = container.createEl('div', { text: '00:00' });
-        this.timeDisplay.addClass('time-display');
+        this.timeDisplay.addClass('simple-time');
         
-        // 按钮容器
-        const buttonContainer = container.createDiv('button-container');
+        // 按钮组
+        const buttonGroup = container.createDiv('simple-buttons');
         
-        // 开始录音按钮
-        const startButtonEl = buttonContainer.createEl('button');
+        // 开始按钮
+        const startButtonEl = buttonGroup.createEl('button');
+        startButtonEl.addClass('start-btn');
         this.startButton = new ButtonComponent(startButtonEl)
             .setButtonText('🎤 开始录音')
-            .setCta()
             .onClick(() => this.handleStart());
         
-        // 暂停/恢复按钮
-        const pauseButtonEl = buttonContainer.createEl('button');
+        // 暂停按钮
+        const pauseButtonEl = buttonGroup.createEl('button');
+        pauseButtonEl.addClass('pause-btn');
         this.pauseButton = new ButtonComponent(pauseButtonEl)
             .setButtonText('⏸️ 暂停')
             .setDisabled(true)
             .onClick(() => this.handlePause());
         
         // 停止按钮
-        const stopButtonEl = buttonContainer.createEl('button');
+        const stopButtonEl = buttonGroup.createEl('button');
+        stopButtonEl.addClass('stop-btn');
         this.stopButton = new ButtonComponent(stopButtonEl)
             .setButtonText('⏹️ 停止')
             .setDisabled(true)
             .onClick(() => this.handleStop());
         
-        // 提示信息
-        const hintText = container.createEl('div', { 
+        // 提示文字
+        this.hintText = container.createEl('div', { 
             text: '点击开始录音，录音完成后将自动转换为文字笔记' 
         });
-        hintText.addClass('hint-text');
+        this.hintText.addClass('simple-hint');
         
         // 设置初始状态
         this.updateUI();
@@ -110,27 +110,34 @@ export class RecordingModal extends Modal {
 
     private async handleStart() {
         try {
-            this.setState('recording');
-            
-            // 检查麦克风权限
-            const hasPermission = await AudioRecorder.checkMicrophonePermission();
-            if (!hasPermission) {
-                throw new Error('需要麦克风权限才能录音');
+            if (this.state === 'paused') {
+                // 继续录音
+                this.audioRecorder?.resumeRecording();
+                this.setState('recording');
+                new Notice('继续录音...');
+            } else {
+                // 开始新录音
+                this.setState('recording');
+                
+                // 检查麦克风权限
+                const hasPermission = await AudioRecorder.checkMicrophonePermission();
+                if (!hasPermission) {
+                    throw new Error('需要麦克风权限才能录音');
+                }
+                
+                // 创建录音器
+                this.audioRecorder = new AudioRecorder(
+                    (audioBlob) => this.handleRecordingComplete(audioBlob),
+                    (error) => this.handleRecordingError(error)
+                );
+                
+                await this.audioRecorder.startRecording();
+                
+                // 启动定时器
+                this.startTimer();
+                
+                new Notice('开始录音...');
             }
-            
-            // 创建录音器
-            this.audioRecorder = new AudioRecorder(
-                (audioBlob) => this.handleRecordingComplete(audioBlob),
-                (error) => this.handleRecordingError(error)
-            );
-            
-            await this.audioRecorder.startRecording();
-            
-            // 启动定时器更新时间显示
-            this.startTimer();
-            
-            new Notice('开始录音...');
-            
         } catch (error) {
             this.setState('idle');
             this.onError(error as Error);
@@ -140,20 +147,13 @@ export class RecordingModal extends Modal {
     private handlePause() {
         if (!this.audioRecorder) return;
         
-        if (this.state === 'recording') {
-            this.audioRecorder.pauseRecording();
-            this.setState('paused');
-            new Notice('录音已暂停');
-        } else if (this.state === 'paused') {
-            this.audioRecorder.resumeRecording();
-            this.setState('recording');
-            new Notice('继续录音...');
-        }
+        this.audioRecorder.pauseRecording();
+        this.setState('paused');
+        new Notice('录音已暂停');
     }
 
     private async handleStop() {
         if (this.audioRecorder && this.audioRecorder.getRecordingState()) {
-            this.setState('processing');
             this.audioRecorder.stopRecording();
             // 录音完成后会自动调用 handleRecordingComplete
         }
@@ -190,41 +190,45 @@ export class RecordingModal extends Modal {
     }
 
     private updateUI() {
-        // 更新状态指示器
-        this.statusIndicator.className = 'status-indicator';
+        // 移除所有状态类
+        this.statusContainer.removeClass('status-idle', 'status-recording', 'status-paused');
+        this.timeDisplay.removeClass('recording');
         
-        // 更新按钮状态和文本
+        // 根据状态更新UI
         switch (this.state) {
             case 'idle':
-                this.statusIndicator.addClass('status-idle');
+                this.statusContainer.addClass('status-idle');
                 this.statusText.textContent = '准备录音';
+                this.hintText.textContent = '点击开始录音，录音完成后将自动转换为文字笔记';
+                
+                // 按钮状态
                 this.startButton.setDisabled(false).setButtonText('🎤 开始录音');
-                this.pauseButton.setDisabled(true).setButtonText('⏸️ 暂停');
-                this.stopButton.setDisabled(true).setButtonText('⏹️ 停止');
+                this.pauseButton.setDisabled(true);
+                this.stopButton.setDisabled(true);
                 break;
                 
             case 'recording':
-                this.statusIndicator.addClass('status-recording');
+                this.statusContainer.addClass('status-recording');
                 this.statusText.textContent = '正在录音...';
-                this.startButton.setDisabled(true).setButtonText('🎤 录音中');
-                this.pauseButton.setDisabled(false).setButtonText('⏸️ 暂停');
-                this.stopButton.setDisabled(false).setButtonText('⏹️ 停止');
+                this.timeDisplay.addClass('recording');
+                this.hintText.textContent = '正在录音中，可以暂停或停止录音';
+                
+                // 按钮状态
+                this.startButton.setDisabled(true);
+                this.pauseButton.setDisabled(false);
+                this.stopButton.setDisabled(false);
                 break;
                 
             case 'paused':
-                this.statusIndicator.addClass('status-paused');
+                this.statusContainer.addClass('status-paused');
                 this.statusText.textContent = '录音已暂停';
-                this.startButton.setDisabled(true).setButtonText('🎤 录音中');
-                this.pauseButton.setDisabled(false).setButtonText('▶️ 继续');
-                this.stopButton.setDisabled(false).setButtonText('⏹️ 停止');
-                break;
+                this.timeDisplay.removeClass('recording');
+                this.hintText.textContent = '录音已暂停，可以继续录音或停止录音';
                 
-            case 'processing':
-                this.statusIndicator.addClass('status-processing');
-                this.statusText.textContent = '处理中...';
-                this.startButton.setDisabled(true).setButtonText('🎤 处理中');
-                this.pauseButton.setDisabled(true).setButtonText('⏸️ 暂停');
-                this.stopButton.setDisabled(true).setButtonText('⏹️ 处理中');
+                // 按钮状态
+                this.startButton.setDisabled(false).setButtonText('▶️ 继续录音');
+                this.pauseButton.setDisabled(true);
+                this.stopButton.setDisabled(false);
                 break;
         }
     }

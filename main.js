@@ -781,27 +781,30 @@ var RecordingModal = class extends import_obsidian3.Modal {
     const { contentEl } = this;
     contentEl.empty();
     contentEl.addClass("recording-modal");
-    const container = contentEl.createDiv("recording-container");
+    const container = contentEl.createDiv("simple-recording-container");
     const title = container.createEl("h2", { text: "\u{1F399}\uFE0F \u8BED\u97F3\u5F55\u5236" });
-    title.addClass("recording-title");
-    const statusContainer = container.createDiv("status-container");
-    this.statusIndicator = statusContainer.createDiv("status-indicator");
-    this.statusIndicator.addClass("status-idle");
-    this.statusText = statusContainer.createEl("div", { text: "\u51C6\u5907\u5F55\u97F3" });
+    title.addClass("simple-recording-title");
+    this.statusContainer = container.createDiv("simple-status");
+    this.statusContainer.addClass("status-idle");
+    this.statusDot = this.statusContainer.createDiv("status-dot");
+    this.statusText = this.statusContainer.createEl("span", { text: "\u51C6\u5907\u5F55\u97F3" });
     this.statusText.addClass("status-text");
     this.timeDisplay = container.createEl("div", { text: "00:00" });
-    this.timeDisplay.addClass("time-display");
-    const buttonContainer = container.createDiv("button-container");
-    const startButtonEl = buttonContainer.createEl("button");
-    this.startButton = new import_obsidian3.ButtonComponent(startButtonEl).setButtonText("\u{1F3A4} \u5F00\u59CB\u5F55\u97F3").setCta().onClick(() => this.handleStart());
-    const pauseButtonEl = buttonContainer.createEl("button");
+    this.timeDisplay.addClass("simple-time");
+    const buttonGroup = container.createDiv("simple-buttons");
+    const startButtonEl = buttonGroup.createEl("button");
+    startButtonEl.addClass("start-btn");
+    this.startButton = new import_obsidian3.ButtonComponent(startButtonEl).setButtonText("\u{1F3A4} \u5F00\u59CB\u5F55\u97F3").onClick(() => this.handleStart());
+    const pauseButtonEl = buttonGroup.createEl("button");
+    pauseButtonEl.addClass("pause-btn");
     this.pauseButton = new import_obsidian3.ButtonComponent(pauseButtonEl).setButtonText("\u23F8\uFE0F \u6682\u505C").setDisabled(true).onClick(() => this.handlePause());
-    const stopButtonEl = buttonContainer.createEl("button");
+    const stopButtonEl = buttonGroup.createEl("button");
+    stopButtonEl.addClass("stop-btn");
     this.stopButton = new import_obsidian3.ButtonComponent(stopButtonEl).setButtonText("\u23F9\uFE0F \u505C\u6B62").setDisabled(true).onClick(() => this.handleStop());
-    const hintText = container.createEl("div", {
+    this.hintText = container.createEl("div", {
       text: "\u70B9\u51FB\u5F00\u59CB\u5F55\u97F3\uFF0C\u5F55\u97F3\u5B8C\u6210\u540E\u5C06\u81EA\u52A8\u8F6C\u6362\u4E3A\u6587\u5B57\u7B14\u8BB0"
     });
-    hintText.addClass("hint-text");
+    this.hintText.addClass("simple-hint");
     this.updateUI();
   }
   onClose() {
@@ -815,19 +818,26 @@ var RecordingModal = class extends import_obsidian3.Modal {
     this.audioRecorder = null;
   }
   async handleStart() {
+    var _a;
     try {
-      this.setState("recording");
-      const hasPermission = await AudioRecorder.checkMicrophonePermission();
-      if (!hasPermission) {
-        throw new Error("\u9700\u8981\u9EA6\u514B\u98CE\u6743\u9650\u624D\u80FD\u5F55\u97F3");
+      if (this.state === "paused") {
+        (_a = this.audioRecorder) == null ? void 0 : _a.resumeRecording();
+        this.setState("recording");
+        new import_obsidian3.Notice("\u7EE7\u7EED\u5F55\u97F3...");
+      } else {
+        this.setState("recording");
+        const hasPermission = await AudioRecorder.checkMicrophonePermission();
+        if (!hasPermission) {
+          throw new Error("\u9700\u8981\u9EA6\u514B\u98CE\u6743\u9650\u624D\u80FD\u5F55\u97F3");
+        }
+        this.audioRecorder = new AudioRecorder(
+          (audioBlob) => this.handleRecordingComplete(audioBlob),
+          (error) => this.handleRecordingError(error)
+        );
+        await this.audioRecorder.startRecording();
+        this.startTimer();
+        new import_obsidian3.Notice("\u5F00\u59CB\u5F55\u97F3...");
       }
-      this.audioRecorder = new AudioRecorder(
-        (audioBlob) => this.handleRecordingComplete(audioBlob),
-        (error) => this.handleRecordingError(error)
-      );
-      await this.audioRecorder.startRecording();
-      this.startTimer();
-      new import_obsidian3.Notice("\u5F00\u59CB\u5F55\u97F3...");
     } catch (error) {
       this.setState("idle");
       this.onError(error);
@@ -836,19 +846,12 @@ var RecordingModal = class extends import_obsidian3.Modal {
   handlePause() {
     if (!this.audioRecorder)
       return;
-    if (this.state === "recording") {
-      this.audioRecorder.pauseRecording();
-      this.setState("paused");
-      new import_obsidian3.Notice("\u5F55\u97F3\u5DF2\u6682\u505C");
-    } else if (this.state === "paused") {
-      this.audioRecorder.resumeRecording();
-      this.setState("recording");
-      new import_obsidian3.Notice("\u7EE7\u7EED\u5F55\u97F3...");
-    }
+    this.audioRecorder.pauseRecording();
+    this.setState("paused");
+    new import_obsidian3.Notice("\u5F55\u97F3\u5DF2\u6682\u505C");
   }
   async handleStop() {
     if (this.audioRecorder && this.audioRecorder.getRecordingState()) {
-      this.setState("processing");
       this.audioRecorder.stopRecording();
     }
   }
@@ -874,35 +877,34 @@ var RecordingModal = class extends import_obsidian3.Modal {
     this.updateUI();
   }
   updateUI() {
-    this.statusIndicator.className = "status-indicator";
+    this.statusContainer.removeClass("status-idle", "status-recording", "status-paused");
+    this.timeDisplay.removeClass("recording");
     switch (this.state) {
       case "idle":
-        this.statusIndicator.addClass("status-idle");
+        this.statusContainer.addClass("status-idle");
         this.statusText.textContent = "\u51C6\u5907\u5F55\u97F3";
+        this.hintText.textContent = "\u70B9\u51FB\u5F00\u59CB\u5F55\u97F3\uFF0C\u5F55\u97F3\u5B8C\u6210\u540E\u5C06\u81EA\u52A8\u8F6C\u6362\u4E3A\u6587\u5B57\u7B14\u8BB0";
         this.startButton.setDisabled(false).setButtonText("\u{1F3A4} \u5F00\u59CB\u5F55\u97F3");
-        this.pauseButton.setDisabled(true).setButtonText("\u23F8\uFE0F \u6682\u505C");
-        this.stopButton.setDisabled(true).setButtonText("\u23F9\uFE0F \u505C\u6B62");
+        this.pauseButton.setDisabled(true);
+        this.stopButton.setDisabled(true);
         break;
       case "recording":
-        this.statusIndicator.addClass("status-recording");
+        this.statusContainer.addClass("status-recording");
         this.statusText.textContent = "\u6B63\u5728\u5F55\u97F3...";
-        this.startButton.setDisabled(true).setButtonText("\u{1F3A4} \u5F55\u97F3\u4E2D");
-        this.pauseButton.setDisabled(false).setButtonText("\u23F8\uFE0F \u6682\u505C");
-        this.stopButton.setDisabled(false).setButtonText("\u23F9\uFE0F \u505C\u6B62");
+        this.timeDisplay.addClass("recording");
+        this.hintText.textContent = "\u6B63\u5728\u5F55\u97F3\u4E2D\uFF0C\u53EF\u4EE5\u6682\u505C\u6216\u505C\u6B62\u5F55\u97F3";
+        this.startButton.setDisabled(true);
+        this.pauseButton.setDisabled(false);
+        this.stopButton.setDisabled(false);
         break;
       case "paused":
-        this.statusIndicator.addClass("status-paused");
+        this.statusContainer.addClass("status-paused");
         this.statusText.textContent = "\u5F55\u97F3\u5DF2\u6682\u505C";
-        this.startButton.setDisabled(true).setButtonText("\u{1F3A4} \u5F55\u97F3\u4E2D");
-        this.pauseButton.setDisabled(false).setButtonText("\u25B6\uFE0F \u7EE7\u7EED");
-        this.stopButton.setDisabled(false).setButtonText("\u23F9\uFE0F \u505C\u6B62");
-        break;
-      case "processing":
-        this.statusIndicator.addClass("status-processing");
-        this.statusText.textContent = "\u5904\u7406\u4E2D...";
-        this.startButton.setDisabled(true).setButtonText("\u{1F3A4} \u5904\u7406\u4E2D");
-        this.pauseButton.setDisabled(true).setButtonText("\u23F8\uFE0F \u6682\u505C");
-        this.stopButton.setDisabled(true).setButtonText("\u23F9\uFE0F \u5904\u7406\u4E2D");
+        this.timeDisplay.removeClass("recording");
+        this.hintText.textContent = "\u5F55\u97F3\u5DF2\u6682\u505C\uFF0C\u53EF\u4EE5\u7EE7\u7EED\u5F55\u97F3\u6216\u505C\u6B62\u5F55\u97F3";
+        this.startButton.setDisabled(false).setButtonText("\u25B6\uFE0F \u7EE7\u7EED\u5F55\u97F3");
+        this.pauseButton.setDisabled(true);
+        this.stopButton.setDisabled(false);
         break;
     }
   }
