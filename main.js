@@ -27,7 +27,7 @@ __export(main_exports, {
   default: () => GetNotePlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian3 = require("obsidian");
+var import_obsidian4 = require("obsidian");
 
 // src/recorder.ts
 var AudioRecorder = class {
@@ -38,6 +38,10 @@ var AudioRecorder = class {
     this.audioChunks = [];
     this.stream = null;
     this.isRecording = false;
+    this.isPaused = false;
+    this.startTime = 0;
+    this.pausedDuration = 0;
+    this.pauseStartTime = 0;
   }
   async startRecording() {
     if (this.isRecording) {
@@ -74,6 +78,9 @@ var AudioRecorder = class {
       };
       this.mediaRecorder.start(1e3);
       this.isRecording = true;
+      this.isPaused = false;
+      this.startTime = Date.now();
+      this.pausedDuration = 0;
     } catch (error) {
       this.onError(new Error(`\u65E0\u6CD5\u542F\u52A8\u5F55\u97F3: ${error.message}`));
       this.cleanup();
@@ -84,10 +91,28 @@ var AudioRecorder = class {
     if (this.mediaRecorder && this.isRecording) {
       this.mediaRecorder.stop();
       this.isRecording = false;
+      this.isPaused = false;
+    }
+  }
+  pauseRecording() {
+    if (this.mediaRecorder && this.isRecording && !this.isPaused) {
+      this.mediaRecorder.pause();
+      this.isPaused = true;
+      this.pauseStartTime = Date.now();
+    }
+  }
+  resumeRecording() {
+    if (this.mediaRecorder && this.isRecording && this.isPaused) {
+      this.mediaRecorder.resume();
+      this.isPaused = false;
+      this.pausedDuration += Date.now() - this.pauseStartTime;
     }
   }
   getRecordingState() {
     return this.isRecording;
+  }
+  getPausedState() {
+    return this.isPaused;
   }
   cleanup() {
     if (this.stream) {
@@ -96,7 +121,11 @@ var AudioRecorder = class {
     }
     this.mediaRecorder = null;
     this.isRecording = false;
+    this.isPaused = false;
     this.audioChunks = [];
+    this.startTime = 0;
+    this.pausedDuration = 0;
+    this.pauseStartTime = 0;
   }
   getSupportedMimeType() {
     const types = [
@@ -117,10 +146,15 @@ var AudioRecorder = class {
   }
   // 获取录音时长（毫秒）
   getRecordingDuration() {
-    if (!this.isRecording || !this.mediaRecorder) {
+    if (!this.isRecording) {
       return 0;
     }
-    return Date.now() - this.mediaRecorder.startTime || 0;
+    const currentTime = Date.now();
+    let totalDuration = currentTime - this.startTime - this.pausedDuration;
+    if (this.isPaused) {
+      totalDuration -= currentTime - this.pauseStartTime;
+    }
+    return Math.max(0, totalDuration);
   }
   // 检查浏览器是否支持录音
   static isSupported() {
@@ -732,52 +766,193 @@ var GetNoteSettingTab = class extends import_obsidian2.PluginSettingTab {
   }
 };
 
+// src/recording-modal.ts
+var import_obsidian3 = require("obsidian");
+var RecordingModal = class extends import_obsidian3.Modal {
+  constructor(app, onRecordingComplete, onError) {
+    super(app);
+    this.audioRecorder = null;
+    this.state = "idle";
+    this.timerInterval = null;
+    this.onRecordingComplete = onRecordingComplete;
+    this.onError = onError;
+  }
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.addClass("recording-modal");
+    const container = contentEl.createDiv("recording-container");
+    const title = container.createEl("h2", { text: "\u{1F399}\uFE0F \u8BED\u97F3\u5F55\u5236" });
+    title.addClass("recording-title");
+    const statusContainer = container.createDiv("status-container");
+    this.statusIndicator = statusContainer.createDiv("status-indicator");
+    this.statusIndicator.addClass("status-idle");
+    this.statusText = statusContainer.createEl("div", { text: "\u51C6\u5907\u5F55\u97F3" });
+    this.statusText.addClass("status-text");
+    this.timeDisplay = container.createEl("div", { text: "00:00" });
+    this.timeDisplay.addClass("time-display");
+    const buttonContainer = container.createDiv("button-container");
+    const startButtonEl = buttonContainer.createEl("button");
+    this.startButton = new import_obsidian3.ButtonComponent(startButtonEl).setButtonText("\u{1F3A4} \u5F00\u59CB\u5F55\u97F3").setCta().onClick(() => this.handleStart());
+    const pauseButtonEl = buttonContainer.createEl("button");
+    this.pauseButton = new import_obsidian3.ButtonComponent(pauseButtonEl).setButtonText("\u23F8\uFE0F \u6682\u505C").setDisabled(true).onClick(() => this.handlePause());
+    const stopButtonEl = buttonContainer.createEl("button");
+    this.stopButton = new import_obsidian3.ButtonComponent(stopButtonEl).setButtonText("\u23F9\uFE0F \u505C\u6B62").setDisabled(true).onClick(() => this.handleStop());
+    const hintText = container.createEl("div", {
+      text: "\u70B9\u51FB\u5F00\u59CB\u5F55\u97F3\uFF0C\u5F55\u97F3\u5B8C\u6210\u540E\u5C06\u81EA\u52A8\u8F6C\u6362\u4E3A\u6587\u5B57\u7B14\u8BB0"
+    });
+    hintText.addClass("hint-text");
+    this.updateUI();
+  }
+  onClose() {
+    if (this.timerInterval) {
+      clearInterval(this.timerInterval);
+      this.timerInterval = null;
+    }
+    if (this.audioRecorder && this.audioRecorder.getRecordingState()) {
+      this.audioRecorder.stopRecording();
+    }
+    this.audioRecorder = null;
+  }
+  async handleStart() {
+    try {
+      this.setState("recording");
+      const hasPermission = await AudioRecorder.checkMicrophonePermission();
+      if (!hasPermission) {
+        throw new Error("\u9700\u8981\u9EA6\u514B\u98CE\u6743\u9650\u624D\u80FD\u5F55\u97F3");
+      }
+      this.audioRecorder = new AudioRecorder(
+        (audioBlob) => this.handleRecordingComplete(audioBlob),
+        (error) => this.handleRecordingError(error)
+      );
+      await this.audioRecorder.startRecording();
+      this.startTimer();
+      new import_obsidian3.Notice("\u5F00\u59CB\u5F55\u97F3...");
+    } catch (error) {
+      this.setState("idle");
+      this.onError(error);
+    }
+  }
+  handlePause() {
+    if (!this.audioRecorder)
+      return;
+    if (this.state === "recording") {
+      this.audioRecorder.pauseRecording();
+      this.setState("paused");
+      new import_obsidian3.Notice("\u5F55\u97F3\u5DF2\u6682\u505C");
+    } else if (this.state === "paused") {
+      this.audioRecorder.resumeRecording();
+      this.setState("recording");
+      new import_obsidian3.Notice("\u7EE7\u7EED\u5F55\u97F3...");
+    }
+  }
+  async handleStop() {
+    if (this.audioRecorder && this.audioRecorder.getRecordingState()) {
+      this.setState("processing");
+      this.audioRecorder.stopRecording();
+    }
+  }
+  async handleRecordingComplete(audioBlob) {
+    try {
+      if (this.timerInterval) {
+        clearInterval(this.timerInterval);
+        this.timerInterval = null;
+      }
+      this.close();
+      await this.onRecordingComplete(audioBlob);
+    } catch (error) {
+      this.setState("idle");
+      this.onError(error);
+    }
+  }
+  handleRecordingError(error) {
+    this.setState("idle");
+    this.onError(error);
+  }
+  setState(newState) {
+    this.state = newState;
+    this.updateUI();
+  }
+  updateUI() {
+    this.statusIndicator.className = "status-indicator";
+    switch (this.state) {
+      case "idle":
+        this.statusIndicator.addClass("status-idle");
+        this.statusText.textContent = "\u51C6\u5907\u5F55\u97F3";
+        this.startButton.setDisabled(false).setButtonText("\u{1F3A4} \u5F00\u59CB\u5F55\u97F3");
+        this.pauseButton.setDisabled(true).setButtonText("\u23F8\uFE0F \u6682\u505C");
+        this.stopButton.setDisabled(true).setButtonText("\u23F9\uFE0F \u505C\u6B62");
+        break;
+      case "recording":
+        this.statusIndicator.addClass("status-recording");
+        this.statusText.textContent = "\u6B63\u5728\u5F55\u97F3...";
+        this.startButton.setDisabled(true).setButtonText("\u{1F3A4} \u5F55\u97F3\u4E2D");
+        this.pauseButton.setDisabled(false).setButtonText("\u23F8\uFE0F \u6682\u505C");
+        this.stopButton.setDisabled(false).setButtonText("\u23F9\uFE0F \u505C\u6B62");
+        break;
+      case "paused":
+        this.statusIndicator.addClass("status-paused");
+        this.statusText.textContent = "\u5F55\u97F3\u5DF2\u6682\u505C";
+        this.startButton.setDisabled(true).setButtonText("\u{1F3A4} \u5F55\u97F3\u4E2D");
+        this.pauseButton.setDisabled(false).setButtonText("\u25B6\uFE0F \u7EE7\u7EED");
+        this.stopButton.setDisabled(false).setButtonText("\u23F9\uFE0F \u505C\u6B62");
+        break;
+      case "processing":
+        this.statusIndicator.addClass("status-processing");
+        this.statusText.textContent = "\u5904\u7406\u4E2D...";
+        this.startButton.setDisabled(true).setButtonText("\u{1F3A4} \u5904\u7406\u4E2D");
+        this.pauseButton.setDisabled(true).setButtonText("\u23F8\uFE0F \u6682\u505C");
+        this.stopButton.setDisabled(true).setButtonText("\u23F9\uFE0F \u5904\u7406\u4E2D");
+        break;
+    }
+  }
+  startTimer() {
+    this.timerInterval = window.setInterval(() => {
+      if (this.audioRecorder) {
+        const duration = this.audioRecorder.getRecordingDuration();
+        this.timeDisplay.textContent = this.formatTime(duration);
+      }
+    }, 100);
+  }
+  formatTime(milliseconds) {
+    const totalSeconds = Math.floor(milliseconds / 1e3);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
+  }
+};
+
 // main.ts
-var GetNotePlugin = class extends import_obsidian3.Plugin {
+var GetNotePlugin = class extends import_obsidian4.Plugin {
   constructor() {
     super(...arguments);
-    this.audioRecorder = null;
     this.dashScopeClient = null;
-    this.recordingStartTime = 0;
+    this.recordingModal = null;
   }
   async onload() {
     await this.loadSettings();
     this.noteGenerator = new NoteGenerator(this.app);
     this.updateDashScopeClient();
     if (!AudioRecorder.isSupported()) {
-      new import_obsidian3.Notice("\u5F53\u524D\u6D4F\u89C8\u5668\u4E0D\u652F\u6301\u5F55\u97F3\u529F\u80FD");
+      new import_obsidian4.Notice("\u5F53\u524D\u6D4F\u89C8\u5668\u4E0D\u652F\u6301\u5F55\u97F3\u529F\u80FD");
       return;
     }
-    this.addRibbonIcon("microphone", "\u5F00\u59CB\u5F55\u97F3", (evt) => {
-      this.toggleRecording();
+    this.addRibbonIcon("microphone", "\u6253\u5F00\u5F55\u97F3\u754C\u9762", (evt) => {
+      this.openRecordingModal();
     });
     this.addCommand({
-      id: "start-recording",
-      name: "\u5F00\u59CB\u8BED\u97F3\u5F55\u5236",
+      id: "open-recording-modal",
+      name: "\u6253\u5F00\u5F55\u97F3\u754C\u9762",
       callback: () => {
-        this.startRecording();
-      }
-    });
-    this.addCommand({
-      id: "stop-recording",
-      name: "\u505C\u6B62\u8BED\u97F3\u5F55\u5236",
-      callback: () => {
-        this.stopRecording();
-      }
-    });
-    this.addCommand({
-      id: "toggle-recording",
-      name: "\u5207\u6362\u5F55\u97F3\u72B6\u6001",
-      callback: () => {
-        this.toggleRecording();
+        this.openRecordingModal();
       }
     });
     this.addSettingTab(new GetNoteSettingTab(this.app, this));
   }
   onunload() {
-    var _a;
-    if ((_a = this.audioRecorder) == null ? void 0 : _a.getRecordingState()) {
-      this.audioRecorder.stopRecording();
+    if (this.recordingModal) {
+      this.recordingModal.close();
+      this.recordingModal = null;
     }
   }
   async loadSettings() {
@@ -792,53 +967,21 @@ var GetNotePlugin = class extends import_obsidian3.Plugin {
       this.dashScopeClient = new DashScopeClient(this.settings.apiKey);
     }
   }
-  async toggleRecording() {
-    var _a;
-    if ((_a = this.audioRecorder) == null ? void 0 : _a.getRecordingState()) {
-      await this.stopRecording();
-    } else {
-      await this.startRecording();
-    }
-  }
-  async startRecording() {
+  openRecordingModal() {
     if (!this.settings.apiKey) {
-      new import_obsidian3.Notice("\u8BF7\u5148\u5728\u8BBE\u7F6E\u4E2D\u914D\u7F6EAPI Key");
+      new import_obsidian4.Notice("\u8BF7\u5148\u5728\u8BBE\u7F6E\u4E2D\u914D\u7F6EAPI Key");
       return;
     }
     if (!this.dashScopeClient) {
-      new import_obsidian3.Notice("API\u5BA2\u6237\u7AEF\u672A\u521D\u59CB\u5316\uFF0C\u8BF7\u68C0\u67E5\u8BBE\u7F6E");
+      new import_obsidian4.Notice("API\u5BA2\u6237\u7AEF\u672A\u521D\u59CB\u5316\uFF0C\u8BF7\u68C0\u67E5\u8BBE\u7F6E");
       return;
     }
-    const hasPermission = await AudioRecorder.checkMicrophonePermission();
-    if (!hasPermission) {
-      new import_obsidian3.Notice("\u9700\u8981\u9EA6\u514B\u98CE\u6743\u9650\u624D\u80FD\u5F55\u97F3");
-      return;
-    }
-    try {
-      this.audioRecorder = new AudioRecorder(
-        (audioBlob) => this.handleAudioData(audioBlob),
-        (error) => this.handleRecordingError(error)
-      );
-      await this.audioRecorder.startRecording();
-      this.recordingStartTime = Date.now();
-      new import_obsidian3.Notice("\u5F00\u59CB\u5F55\u97F3...");
-      setTimeout(() => {
-        var _a;
-        if ((_a = this.audioRecorder) == null ? void 0 : _a.getRecordingState()) {
-          this.audioRecorder.stopRecording();
-          new import_obsidian3.Notice(`\u5DF2\u8FBE\u5230\u6700\u5927\u5F55\u97F3\u65F6\u957F ${this.settings.maxRecordingDuration} \u79D2`);
-        }
-      }, this.settings.maxRecordingDuration * 1e3);
-    } catch (error) {
-      new import_obsidian3.Notice(`\u65E0\u6CD5\u5F00\u59CB\u5F55\u97F3: ${error.message}`);
-    }
-  }
-  async stopRecording() {
-    var _a;
-    if ((_a = this.audioRecorder) == null ? void 0 : _a.getRecordingState()) {
-      this.audioRecorder.stopRecording();
-      new import_obsidian3.Notice("\u5F55\u97F3\u7ED3\u675F\uFF0C\u6B63\u5728\u5904\u7406...");
-    }
+    this.recordingModal = new RecordingModal(
+      this.app,
+      (audioBlob) => this.handleAudioData(audioBlob),
+      (error) => this.handleRecordingError(error)
+    );
+    this.recordingModal.open();
   }
   async handleAudioData(audioBlob) {
     const processingStartTime = Date.now();
@@ -848,20 +991,17 @@ var GetNotePlugin = class extends import_obsidian3.Plugin {
       }
       const sizeCheck = this.dashScopeClient.checkAudioSize(audioBlob);
       if (!sizeCheck.valid) {
-        new import_obsidian3.Notice(sizeCheck.message || "\u97F3\u9891\u6587\u4EF6\u8FC7\u5927");
+        new import_obsidian4.Notice(sizeCheck.message || "\u97F3\u9891\u6587\u4EF6\u8FC7\u5927");
         return;
       }
-      new import_obsidian3.Notice("\u6B63\u5728\u8C03\u7528AI\u5206\u6790\u97F3\u9891...");
-      const aiResponse = await this.dashScopeClient.processAudio(
-        audioBlob,
-        this.settings.promptTemplate
-      );
+      new import_obsidian4.Notice("\u6B63\u5728\u8C03\u7528AI\u8F6C\u5F55\u97F3\u9891...");
+      const aiResponse = await this.dashScopeClient.processAudio(audioBlob);
       const processingDuration = Date.now() - processingStartTime;
-      const recordingDuration = processingStartTime - this.recordingStartTime;
       const metadata = {
         title: this.noteGenerator.extractTitleFromContent(aiResponse),
         timestamp: new Date(),
-        duration: this.noteGenerator.formatDuration(recordingDuration),
+        duration: "\u97F3\u9891\u8F6C\u5F55",
+        // 由于使用Modal，录音时长在Modal中管理
         audioSize: this.noteGenerator.formatFileSize(audioBlob.size),
         processingTime: this.noteGenerator.formatDuration(processingDuration),
         model: this.settings.modelName
@@ -872,23 +1012,23 @@ var GetNotePlugin = class extends import_obsidian3.Plugin {
         this.settings.includeMetadata
       );
       if (this.settings.autoSave) {
-        const fileName = this.noteGenerator.generateFileName("\u8BED\u97F3\u7B14\u8BB0", metadata.timestamp);
+        const fileName = this.noteGenerator.generateFileName("\u8BED\u97F3\u8F6C\u5F55", metadata.timestamp);
         const savedFile = await this.noteGenerator.saveNote(
           noteContent,
           this.settings.outputFolder,
           fileName
         );
-        new import_obsidian3.Notice(`\u7B14\u8BB0\u5DF2\u4FDD\u5B58: ${savedFile.name}`);
+        new import_obsidian4.Notice(`\u8F6C\u5F55\u5B8C\u6210\uFF0C\u7B14\u8BB0\u5DF2\u4FDD\u5B58: ${savedFile.name}`);
       } else {
-        new import_obsidian3.Notice("\u97F3\u9891\u5904\u7406\u5B8C\u6210\uFF0C\u8BF7\u624B\u52A8\u4FDD\u5B58\u7B14\u8BB0");
+        new import_obsidian4.Notice("\u97F3\u9891\u8F6C\u5F55\u5B8C\u6210\uFF0C\u8BF7\u624B\u52A8\u4FDD\u5B58\u7B14\u8BB0");
       }
     } catch (error) {
       console.error("\u5904\u7406\u97F3\u9891\u65F6\u51FA\u9519:", error);
-      new import_obsidian3.Notice(`\u5904\u7406\u97F3\u9891\u65F6\u51FA\u9519: ${error.message}`);
+      new import_obsidian4.Notice(`\u5904\u7406\u97F3\u9891\u65F6\u51FA\u9519: ${error.message}`);
     }
   }
   handleRecordingError(error) {
     console.error("\u5F55\u97F3\u9519\u8BEF:", error);
-    new import_obsidian3.Notice(`\u5F55\u97F3\u51FA\u9519: ${error.message}`);
+    new import_obsidian4.Notice(`\u5F55\u97F3\u51FA\u9519: ${error.message}`);
   }
 };

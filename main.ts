@@ -3,13 +3,13 @@ import { AudioRecorder } from './src/recorder';
 import { DashScopeClient } from './src/api-client';
 import { NoteGenerator, NoteMetadata } from './src/note-generator';
 import { GetNoteSettings, DEFAULT_SETTINGS, GetNoteSettingTab } from './src/settings';
+import { RecordingModal } from './src/recording-modal';
 
 export default class GetNotePlugin extends Plugin {
 	settings: GetNoteSettings;
-	private audioRecorder: AudioRecorder | null = null;
 	private dashScopeClient: DashScopeClient | null = null;
 	private noteGenerator: NoteGenerator;
-	private recordingStartTime: number = 0;
+	private recordingModal: RecordingModal | null = null;
 
 	async onload() {
 		await this.loadSettings();
@@ -25,32 +25,16 @@ export default class GetNotePlugin extends Plugin {
 		}
 
 		// 添加录音按钮到工具栏
-		this.addRibbonIcon('microphone', '开始录音', (evt: MouseEvent) => {
-			this.toggleRecording();
+		this.addRibbonIcon('microphone', '打开录音界面', (evt: MouseEvent) => {
+			this.openRecordingModal();
 		});
 
 		// 添加命令
 		this.addCommand({
-			id: 'start-recording',
-			name: '开始语音录制',
+			id: 'open-recording-modal',
+			name: '打开录音界面',
 			callback: () => {
-				this.startRecording();
-			}
-		});
-
-		this.addCommand({
-			id: 'stop-recording',
-			name: '停止语音录制',
-			callback: () => {
-				this.stopRecording();
-			}
-		});
-
-		this.addCommand({
-			id: 'toggle-recording',
-			name: '切换录音状态',
-			callback: () => {
-				this.toggleRecording();
+				this.openRecordingModal();
 			}
 		});
 
@@ -59,8 +43,10 @@ export default class GetNotePlugin extends Plugin {
 	}
 
 	onunload() {
-		if (this.audioRecorder?.getRecordingState()) {
-			this.audioRecorder.stopRecording();
+		// 清理录音Modal
+		if (this.recordingModal) {
+			this.recordingModal.close();
+			this.recordingModal = null;
 		}
 	}
 
@@ -79,15 +65,8 @@ export default class GetNotePlugin extends Plugin {
 		}
 	}
 
-	private async toggleRecording() {
-		if (this.audioRecorder?.getRecordingState()) {
-			await this.stopRecording();
-		} else {
-			await this.startRecording();
-		}
-	}
-
-	private async startRecording() {
+	private openRecordingModal() {
+		// 检查API配置
 		if (!this.settings.apiKey) {
 			new Notice('请先在设置中配置API Key');
 			return;
@@ -98,42 +77,14 @@ export default class GetNotePlugin extends Plugin {
 			return;
 		}
 
-		// 检查麦克风权限
-		const hasPermission = await AudioRecorder.checkMicrophonePermission();
-		if (!hasPermission) {
-			new Notice('需要麦克风权限才能录音');
-			return;
-		}
-
-		try {
-			this.audioRecorder = new AudioRecorder(
-				(audioBlob) => this.handleAudioData(audioBlob),
-				(error) => this.handleRecordingError(error)
-			);
-
-			await this.audioRecorder.startRecording();
-			this.recordingStartTime = Date.now();
-			
-			new Notice('开始录音...');
-			
-			// 设置最大录音时长定时器
-			setTimeout(() => {
-				if (this.audioRecorder?.getRecordingState()) {
-					this.audioRecorder.stopRecording();
-					new Notice(`已达到最大录音时长 ${this.settings.maxRecordingDuration} 秒`);
-				}
-			}, this.settings.maxRecordingDuration * 1000);
-
-		} catch (error) {
-			new Notice(`无法开始录音: ${error.message}`);
-		}
-	}
-
-	private async stopRecording() {
-		if (this.audioRecorder?.getRecordingState()) {
-			this.audioRecorder.stopRecording();
-			new Notice('录音结束，正在处理...');
-		}
+		// 创建并打开录音Modal
+		this.recordingModal = new RecordingModal(
+			this.app,
+			(audioBlob) => this.handleAudioData(audioBlob),
+			(error) => this.handleRecordingError(error)
+		);
+		
+		this.recordingModal.open();
 	}
 
 	private async handleAudioData(audioBlob: Blob) {
@@ -151,23 +102,19 @@ export default class GetNotePlugin extends Plugin {
 				return;
 			}
 
-			new Notice('正在调用AI分析音频...');
+			new Notice('正在调用AI转录音频...');
 
-			// 调用API处理音频
-			const aiResponse = await this.dashScopeClient.processAudio(
-				audioBlob, 
-				this.settings.promptTemplate
-			);
+			// 调用API处理音频 - 注意：qwen-audio-asr-latest不需要提示词
+			const aiResponse = await this.dashScopeClient.processAudio(audioBlob);
 
 			// 计算处理时间
 			const processingDuration = Date.now() - processingStartTime;
-			const recordingDuration = processingStartTime - this.recordingStartTime;
 
 			// 创建笔记元数据
 			const metadata: NoteMetadata = {
 				title: this.noteGenerator.extractTitleFromContent(aiResponse),
 				timestamp: new Date(),
-				duration: this.noteGenerator.formatDuration(recordingDuration),
+				duration: '音频转录', // 由于使用Modal，录音时长在Modal中管理
 				audioSize: this.noteGenerator.formatFileSize(audioBlob.size),
 				processingTime: this.noteGenerator.formatDuration(processingDuration),
 				model: this.settings.modelName
@@ -182,17 +129,17 @@ export default class GetNotePlugin extends Plugin {
 
 			// 保存笔记
 			if (this.settings.autoSave) {
-				const fileName = this.noteGenerator.generateFileName('语音笔记', metadata.timestamp);
+				const fileName = this.noteGenerator.generateFileName('语音转录', metadata.timestamp);
 				const savedFile = await this.noteGenerator.saveNote(
 					noteContent,
 					this.settings.outputFolder,
 					fileName
 				);
 				
-				new Notice(`笔记已保存: ${savedFile.name}`);
+				new Notice(`转录完成，笔记已保存: ${savedFile.name}`);
 			} else {
 				// 如果不自动保存，可以显示预览或提示用户手动保存
-				new Notice('音频处理完成，请手动保存笔记');
+				new Notice('音频转录完成，请手动保存笔记');
 			}
 
 		} catch (error) {

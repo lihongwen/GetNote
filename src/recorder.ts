@@ -3,6 +3,10 @@ export class AudioRecorder {
     private audioChunks: Blob[] = [];
     private stream: MediaStream | null = null;
     private isRecording = false;
+    private isPaused = false;
+    private startTime: number = 0;
+    private pausedDuration: number = 0;
+    private pauseStartTime: number = 0;
 
     constructor(
         private onDataAvailable: (blob: Blob) => void,
@@ -55,6 +59,9 @@ export class AudioRecorder {
             // 开始录音
             this.mediaRecorder.start(1000); // 每1秒收集一次数据
             this.isRecording = true;
+            this.isPaused = false;
+            this.startTime = Date.now();
+            this.pausedDuration = 0;
 
         } catch (error) {
             this.onError(new Error(`无法启动录音: ${error.message}`));
@@ -67,11 +74,32 @@ export class AudioRecorder {
         if (this.mediaRecorder && this.isRecording) {
             this.mediaRecorder.stop();
             this.isRecording = false;
+            this.isPaused = false;
+        }
+    }
+
+    pauseRecording(): void {
+        if (this.mediaRecorder && this.isRecording && !this.isPaused) {
+            this.mediaRecorder.pause();
+            this.isPaused = true;
+            this.pauseStartTime = Date.now();
+        }
+    }
+
+    resumeRecording(): void {
+        if (this.mediaRecorder && this.isRecording && this.isPaused) {
+            this.mediaRecorder.resume();
+            this.isPaused = false;
+            this.pausedDuration += Date.now() - this.pauseStartTime;
         }
     }
 
     getRecordingState(): boolean {
         return this.isRecording;
+    }
+
+    getPausedState(): boolean {
+        return this.isPaused;
     }
 
     private cleanup(): void {
@@ -82,7 +110,11 @@ export class AudioRecorder {
         
         this.mediaRecorder = null;
         this.isRecording = false;
+        this.isPaused = false;
         this.audioChunks = [];
+        this.startTime = 0;
+        this.pausedDuration = 0;
+        this.pauseStartTime = 0;
     }
 
     private getSupportedMimeType(): string {
@@ -108,11 +140,19 @@ export class AudioRecorder {
 
     // 获取录音时长（毫秒）
     getRecordingDuration(): number {
-        if (!this.isRecording || !this.mediaRecorder) {
+        if (!this.isRecording) {
             return 0;
         }
-        // 这里可以添加录音时长计算逻辑
-        return Date.now() - (this.mediaRecorder as any).startTime || 0;
+        
+        const currentTime = Date.now();
+        let totalDuration = currentTime - this.startTime - this.pausedDuration;
+        
+        // 如果当前正在暂停，还需要减去当前暂停的时间
+        if (this.isPaused) {
+            totalDuration -= (currentTime - this.pauseStartTime);
+        }
+        
+        return Math.max(0, totalDuration);
     }
 
     // 检查浏览器是否支持录音

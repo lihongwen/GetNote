@@ -1,0 +1,255 @@
+/* 录音Modal样式 */
+.recording-modal {
+    max-width: 400px;
+    margin: 0 auto;
+}
+
+.recording-container {
+    padding: 20px;
+    text-align: center;
+    background: var(--background-primary);
+    border-radius: 8px;
+}
+
+.recording-title {
+    margin: 0 0 20px 0;
+    color: var(--text-normal);
+    font-size: 1.5em;
+    font-weight: 600;
+}
+
+/* 状态容器 */
+.status-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 15px;
+    margin-bottom: 20px;
+    padding: 15px;
+    background: var(--background-secondary);
+    border-radius: 12px;
+}
+
+/* 状态指示器（圆形） */
+.status-indicator {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    position: relative;
+    flex-shrink: 0;
+}
+
+.status-idle {
+    background: var(--text-faint);
+    box-shadow: 0 0 0 2px var(--background-secondary);
+}
+
+.status-recording {
+    background: #ff4757;
+    animation: pulse-recording 1.5s ease-in-out infinite;
+    box-shadow: 0 0 0 2px var(--background-secondary);
+}
+
+.status-paused {
+    background: #ffa502;
+    animation: pulse-paused 2s ease-in-out infinite;
+    box-shadow: 0 0 0 2px var(--background-secondary);
+}
+
+.status-processing {
+    background: #3742fa;
+    animation: pulse-processing 1s ease-in-out infinite;
+    box-shadow: 0 0 0 2px var(--background-secondary);
+}
+
+/* 状态指示器动画 */
+@keyframes pulse-recording {
+    0%, 100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+    50% {
+        transform: scale(1.2);
+        opacity: 0.8;
+    }
+}
+
+@keyframes pulse-paused {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
+}
+
+@keyframes pulse-processing {
+    0%, 100% {
+        transform: scale(1);
+    }
+    50% {
+        transform: scale(1.1);
+    }
+}
+
+/* 状态文本 */
+.status-text {
+    font-size: 1.1em;
+    font-weight: 500;
+    color: var(--text-normal);
+    margin: 0;
+}
+
+/* 时间显示 */
+.time-display {
+    font-size: 2.5em;
+    font-weight: 700;
+    color: var(--text-accent);
+    margin: 20px 0;
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
+    background: var(--background-secondary);
+    padding: 15px 25px;
+    border-radius: 12px;
+    display: inline-block;
+    min-width: 120px;
+    letter-spacing: 2px;
+}
+
+/* 按钮容器 */
+.button-container {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    margin: 25px 0;
+}
+
+.button-container button {
+    flex: 1;
+    max-width: 120px;
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-size: 0.9em;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    border: 2px solid transparent;
+    cursor: pointer;
+}
+
+.button-container button:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.button-container button:active:not(:disabled) {
+    transform: translateY(0);
+}
+
+.button-container button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none !important;
+}
+
+/* 开始按钮样式 */
+.button-container button.mod-cta {
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+    border-color: var(--interactive-accent);
+}
+
+.button-container button.mod-cta:hover:not(:disabled) {
+    background: var(--interactive-accent-hover);
+    border-color: var(--interactive-accent-hover);
+}
+
+/* 暂停按钮特殊样式 */
+.button-container button:nth-child(2) {
+    background: var(--background-modifier-border);
+    color: var(--text-normal);
+    border-color: var(--background-modifier-border);
+}
+
+.button-container button:nth-child(2):hover:not(:disabled) {
+    background: var(--background-modifier-hover);
+    border-color: var(--background-modifier-hover);
+}
+
+/* 停止按钮特殊样式 */
+.button-container button:nth-child(3) {
+    background: var(--text-error);
+    color: var(--text-on-accent);
+    border-color: var(--text-error);
+}
+
+.button-container button:nth-child(3):hover:not(:disabled) {
+    background: #d63031;
+    border-color: #d63031;
+}
+
+/* 提示文本 */
+.hint-text {
+    font-size: 0.9em;
+    color: var(--text-muted);
+    line-height: 1.4;
+    margin-top: 15px;
+    padding: 10px;
+    background: var(--background-secondary);
+    border-radius: 6px;
+    border-left: 3px solid var(--text-accent);
+}
+
+/* 响应式设计 */
+@media (max-width: 480px) {
+    .recording-container {
+        padding: 15px;
+    }
+    
+    .button-container {
+        flex-direction: column;
+        gap: 8px;
+    }
+    
+    .button-container button {
+        max-width: none;
+    }
+    
+    .time-display {
+        font-size: 2em;
+        padding: 12px 20px;
+    }
+    
+    .status-container {
+        flex-direction: column;
+        gap: 10px;
+        text-align: center;
+    }
+}
+
+/* 暗色主题优化 */
+.theme-dark .recording-container {
+    background: var(--background-primary);
+}
+
+.theme-dark .status-container {
+    background: var(--background-primary-alt);
+}
+
+.theme-dark .time-display {
+    background: var(--background-primary-alt);
+}
+
+.theme-dark .hint-text {
+    background: var(--background-primary-alt);
+}
+
+/* 高对比度模式 */
+@media (prefers-contrast: high) {
+    .status-indicator {
+        border: 2px solid var(--text-normal);
+    }
+    
+    .button-container button {
+        border-width: 2px;
+        border-style: solid;
+    }
+} 
