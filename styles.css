@@ -184,6 +184,29 @@
     box-shadow: none;
 }
 
+/* 取消按钮 */
+.cancel-btn {
+    background: #6B7280;
+    color: white;
+    box-shadow: 0 2px 8px rgba(107, 114, 128, 0.3);
+    border: 1px solid #4B5563;
+}
+
+.cancel-btn:hover:not(:disabled) {
+    background: #4B5563;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(107, 114, 128, 0.4);
+}
+
+.cancel-btn:disabled {
+    background: #9CA3AF;
+    color: #6B7280;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+    border-color: #9CA3AF;
+}
+
 /* 按钮按下效果 */
 .simple-buttons button:active:not(:disabled) {
     transform: translateY(0);

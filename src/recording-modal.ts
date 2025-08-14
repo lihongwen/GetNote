@@ -16,25 +16,32 @@ export class RecordingModal extends Modal {
     private startButton: ButtonComponent;
     private pauseButton: ButtonComponent;
     private stopButton: ButtonComponent;
+    private cancelButton: ButtonComponent;
     private hintText: HTMLElement;
     
     // Callbacks
     private onRecordingComplete: (audioBlob: Blob) => Promise<void>;
     private onError: (error: Error) => void;
+    private onCancel?: () => void; // 新增取消回调
     
     // Processing state
     private enableLLMProcessing: boolean = false;
+    
+    // Cancel confirmation
+    private isClosing: boolean = false;
 
     constructor(
         app: App, 
         onRecordingComplete: (audioBlob: Blob) => Promise<void>,
         onError: (error: Error) => void,
-        enableLLMProcessing: boolean = false
+        enableLLMProcessing: boolean = false,
+        onCancel?: () => void
     ) {
         super(app);
         this.onRecordingComplete = onRecordingComplete;
         this.onError = onError;
         this.enableLLMProcessing = enableLLMProcessing;
+        this.onCancel = onCancel;
     }
 
     onOpen() {
@@ -87,6 +94,13 @@ export class RecordingModal extends Modal {
             .setButtonText('⏹️ 停止')
             .setDisabled(true)
             .onClick(() => this.handleStop());
+
+        // 取消按钮
+        const cancelButtonEl = buttonGroup.createEl('button');
+        cancelButtonEl.addClass('cancel-btn');
+        this.cancelButton = new ButtonComponent(cancelButtonEl)
+            .setButtonText('❌ 取消')
+            .onClick(() => this.handleCancel());
         
         // 提示文字
         const hintText = this.enableLLMProcessing 
@@ -100,6 +114,107 @@ export class RecordingModal extends Modal {
     }
 
     onClose() {
+        // 如果已经在关闭过程中，直接执行清理
+        if (this.isClosing) {
+            this.performCleanup();
+            return;
+        }
+
+        // 检查是否需要确认关闭
+        if (this.shouldConfirmClose()) {
+            this.showCloseConfirmation();
+            return; // 阻止立即关闭，等待用户确认
+        }
+
+        // 直接关闭（idle状态或其他不需要确认的情况）
+        this.confirmClose();
+    }
+
+    /**
+     * 检查是否需要确认关闭
+     */
+    private shouldConfirmClose(): boolean {
+        // idle状态不需要确认
+        if (this.state === 'idle') {
+            return false;
+        }
+
+        // 其他状态都需要确认
+        return this.state === 'recording' || 
+               this.state === 'paused' || 
+               this.state === 'transcribing' || 
+               this.state === 'processing' || 
+               this.state === 'saving';
+    }
+
+    /**
+     * 显示关闭确认对话框
+     */
+    private showCloseConfirmation(): void {
+        const message = this.getConfirmationMessage();
+        const confirmed = confirm(message);
+        
+        if (confirmed) {
+            this.confirmClose();
+        }
+        // 如果用户取消，什么都不做，继续当前状态
+    }
+
+    /**
+     * 根据当前状态获取确认消息
+     */
+    private getConfirmationMessage(): string {
+        switch (this.state) {
+            case 'recording':
+            case 'paused':
+                return '确定要取消录音吗？\n\n录音内容将会丢失，无法恢复。';
+            
+            case 'transcribing':
+                return '正在转录音频，确定要取消吗？\n\n已录制的内容将会丢失。';
+            
+            case 'processing':
+                return '正在处理录音，确定要取消吗？\n\n已录制和转录的内容将会丢失。';
+            
+            case 'saving':
+                return '正在保存笔记，确定要取消吗？\n\n处理完成的内容可能会丢失。';
+            
+            default:
+                return '确定要关闭录音界面吗？';
+        }
+    }
+
+    /**
+     * 确认关闭并执行清理
+     */
+    private confirmClose(): void {
+        this.isClosing = true;
+        
+        // 通知外部取消处理（如果正在进行API调用）
+        this.notifyCancellation();
+        
+        // 执行清理
+        this.performCleanup();
+        
+        // 关闭Modal
+        super.close();
+    }
+
+    /**
+     * 通知外部取消当前处理
+     */
+    private notifyCancellation(): void {
+        console.log(`取消录音，当前状态: ${this.state}`);
+        
+        // 调用取消回调，通知主程序用户取消了操作
+        if (this.onCancel) {
+            this.onCancel();
+        }
+    }
+
+    /**
+     * 执行资源清理
+     */
+    private performCleanup(): void {
         // 清理定时器
         if (this.timerInterval) {
             clearInterval(this.timerInterval);
@@ -108,10 +223,16 @@ export class RecordingModal extends Modal {
         
         // 如果正在录音，先停止
         if (this.audioRecorder && this.audioRecorder.getRecordingState()) {
+            console.log('停止录音...');
             this.audioRecorder.stopRecording();
         }
         
+        // 清理录音器引用
         this.audioRecorder = null;
+        
+        // 重置状态
+        this.state = 'idle';
+        this.isClosing = false;
     }
 
     private async handleStart() {
@@ -165,6 +286,11 @@ export class RecordingModal extends Modal {
         }
     }
 
+    private handleCancel() {
+        // 直接触发关闭确认流程
+        this.showCloseConfirmation();
+    }
+
     private async handleRecordingComplete(audioBlob: Blob) {
         try {
             // 停止定时器
@@ -216,6 +342,7 @@ export class RecordingModal extends Modal {
                 this.startButton.setDisabled(false).setButtonText('🎤 开始录音');
                 this.pauseButton.setDisabled(true);
                 this.stopButton.setDisabled(true);
+                this.cancelButton.setDisabled(true);
                 break;
                 
             case 'recording':
@@ -228,6 +355,7 @@ export class RecordingModal extends Modal {
                 this.startButton.setDisabled(true);
                 this.pauseButton.setDisabled(false);
                 this.stopButton.setDisabled(false);
+                this.cancelButton.setDisabled(false);
                 break;
                 
             case 'paused':
@@ -240,6 +368,7 @@ export class RecordingModal extends Modal {
                 this.startButton.setDisabled(false).setButtonText('▶️ 继续录音');
                 this.pauseButton.setDisabled(true);
                 this.stopButton.setDisabled(false);
+                this.cancelButton.setDisabled(false);
                 break;
                 
             case 'transcribing':
@@ -252,6 +381,7 @@ export class RecordingModal extends Modal {
                 this.startButton.setDisabled(true);
                 this.pauseButton.setDisabled(true);
                 this.stopButton.setDisabled(true);
+                this.cancelButton.setDisabled(false).setButtonText('❌ 取消');
                 break;
                 
             case 'processing':
@@ -260,10 +390,11 @@ export class RecordingModal extends Modal {
                 this.timeDisplay.removeClass('recording');
                 this.hintText.textContent = '正在使用AI优化文本内容和生成标签，请稍候...';
                 
-                // 禁用所有按钮
+                // 禁用功能按钮，保留取消按钮
                 this.startButton.setDisabled(true);
                 this.pauseButton.setDisabled(true);
                 this.stopButton.setDisabled(true);
+                this.cancelButton.setDisabled(false).setButtonText('❌ 取消');
                 break;
                 
             case 'saving':
@@ -272,10 +403,11 @@ export class RecordingModal extends Modal {
                 this.timeDisplay.removeClass('recording');
                 this.hintText.textContent = '正在保存笔记到您的库中...';
                 
-                // 禁用所有按钮
+                // 保存阶段仍可取消，但风险更高
                 this.startButton.setDisabled(true);
                 this.pauseButton.setDisabled(true);
                 this.stopButton.setDisabled(true);
+                this.cancelButton.setDisabled(false).setButtonText('❌ 取消');
                 break;
         }
     }

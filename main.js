@@ -1158,16 +1158,20 @@ var GetNoteSettingTab = class extends import_obsidian2.PluginSettingTab {
 // src/recording-modal.ts
 var import_obsidian3 = require("obsidian");
 var RecordingModal = class extends import_obsidian3.Modal {
-  constructor(app, onRecordingComplete, onError, enableLLMProcessing = false) {
+  constructor(app, onRecordingComplete, onError, enableLLMProcessing = false, onCancel) {
     super(app);
     this.audioRecorder = null;
     this.state = "idle";
     this.timerInterval = null;
+    // 新增取消回调
     // Processing state
     this.enableLLMProcessing = false;
+    // Cancel confirmation
+    this.isClosing = false;
     this.onRecordingComplete = onRecordingComplete;
     this.onError = onError;
     this.enableLLMProcessing = enableLLMProcessing;
+    this.onCancel = onCancel;
   }
   onOpen() {
     const { contentEl } = this;
@@ -1193,20 +1197,95 @@ var RecordingModal = class extends import_obsidian3.Modal {
     const stopButtonEl = buttonGroup.createEl("button");
     stopButtonEl.addClass("stop-btn");
     this.stopButton = new import_obsidian3.ButtonComponent(stopButtonEl).setButtonText("\u23F9\uFE0F \u505C\u6B62").setDisabled(true).onClick(() => this.handleStop());
+    const cancelButtonEl = buttonGroup.createEl("button");
+    cancelButtonEl.addClass("cancel-btn");
+    this.cancelButton = new import_obsidian3.ButtonComponent(cancelButtonEl).setButtonText("\u274C \u53D6\u6D88").onClick(() => this.handleCancel());
     const hintText = this.enableLLMProcessing ? "\u70B9\u51FB\u5F00\u59CB\u5F55\u97F3\uFF0C\u5B8C\u6210\u540E\u5C06\u8FDB\u884CAI\u8F6C\u5F55\u548C\u6587\u672C\u4F18\u5316" : "\u70B9\u51FB\u5F00\u59CB\u5F55\u97F3\uFF0C\u5F55\u97F3\u5B8C\u6210\u540E\u5C06\u81EA\u52A8\u8F6C\u6362\u4E3A\u6587\u5B57\u7B14\u8BB0";
     this.hintText = container.createEl("div", { text: hintText });
     this.hintText.addClass("simple-hint");
     this.updateUI();
   }
   onClose() {
+    if (this.isClosing) {
+      this.performCleanup();
+      return;
+    }
+    if (this.shouldConfirmClose()) {
+      this.showCloseConfirmation();
+      return;
+    }
+    this.confirmClose();
+  }
+  /**
+   * 检查是否需要确认关闭
+   */
+  shouldConfirmClose() {
+    if (this.state === "idle") {
+      return false;
+    }
+    return this.state === "recording" || this.state === "paused" || this.state === "transcribing" || this.state === "processing" || this.state === "saving";
+  }
+  /**
+   * 显示关闭确认对话框
+   */
+  showCloseConfirmation() {
+    const message = this.getConfirmationMessage();
+    const confirmed = confirm(message);
+    if (confirmed) {
+      this.confirmClose();
+    }
+  }
+  /**
+   * 根据当前状态获取确认消息
+   */
+  getConfirmationMessage() {
+    switch (this.state) {
+      case "recording":
+      case "paused":
+        return "\u786E\u5B9A\u8981\u53D6\u6D88\u5F55\u97F3\u5417\uFF1F\n\n\u5F55\u97F3\u5185\u5BB9\u5C06\u4F1A\u4E22\u5931\uFF0C\u65E0\u6CD5\u6062\u590D\u3002";
+      case "transcribing":
+        return "\u6B63\u5728\u8F6C\u5F55\u97F3\u9891\uFF0C\u786E\u5B9A\u8981\u53D6\u6D88\u5417\uFF1F\n\n\u5DF2\u5F55\u5236\u7684\u5185\u5BB9\u5C06\u4F1A\u4E22\u5931\u3002";
+      case "processing":
+        return "\u6B63\u5728\u5904\u7406\u5F55\u97F3\uFF0C\u786E\u5B9A\u8981\u53D6\u6D88\u5417\uFF1F\n\n\u5DF2\u5F55\u5236\u548C\u8F6C\u5F55\u7684\u5185\u5BB9\u5C06\u4F1A\u4E22\u5931\u3002";
+      case "saving":
+        return "\u6B63\u5728\u4FDD\u5B58\u7B14\u8BB0\uFF0C\u786E\u5B9A\u8981\u53D6\u6D88\u5417\uFF1F\n\n\u5904\u7406\u5B8C\u6210\u7684\u5185\u5BB9\u53EF\u80FD\u4F1A\u4E22\u5931\u3002";
+      default:
+        return "\u786E\u5B9A\u8981\u5173\u95ED\u5F55\u97F3\u754C\u9762\u5417\uFF1F";
+    }
+  }
+  /**
+   * 确认关闭并执行清理
+   */
+  confirmClose() {
+    this.isClosing = true;
+    this.notifyCancellation();
+    this.performCleanup();
+    super.close();
+  }
+  /**
+   * 通知外部取消当前处理
+   */
+  notifyCancellation() {
+    console.log(`\u53D6\u6D88\u5F55\u97F3\uFF0C\u5F53\u524D\u72B6\u6001: ${this.state}`);
+    if (this.onCancel) {
+      this.onCancel();
+    }
+  }
+  /**
+   * 执行资源清理
+   */
+  performCleanup() {
     if (this.timerInterval) {
       clearInterval(this.timerInterval);
       this.timerInterval = null;
     }
     if (this.audioRecorder && this.audioRecorder.getRecordingState()) {
+      console.log("\u505C\u6B62\u5F55\u97F3...");
       this.audioRecorder.stopRecording();
     }
     this.audioRecorder = null;
+    this.state = "idle";
+    this.isClosing = false;
   }
   async handleStart() {
     var _a;
@@ -1246,6 +1325,9 @@ var RecordingModal = class extends import_obsidian3.Modal {
       this.audioRecorder.stopRecording();
     }
   }
+  handleCancel() {
+    this.showCloseConfirmation();
+  }
   async handleRecordingComplete(audioBlob) {
     try {
       if (this.timerInterval) {
@@ -1279,6 +1361,7 @@ var RecordingModal = class extends import_obsidian3.Modal {
         this.startButton.setDisabled(false).setButtonText("\u{1F3A4} \u5F00\u59CB\u5F55\u97F3");
         this.pauseButton.setDisabled(true);
         this.stopButton.setDisabled(true);
+        this.cancelButton.setDisabled(true);
         break;
       case "recording":
         this.statusContainer.addClass("status-recording");
@@ -1288,6 +1371,7 @@ var RecordingModal = class extends import_obsidian3.Modal {
         this.startButton.setDisabled(true);
         this.pauseButton.setDisabled(false);
         this.stopButton.setDisabled(false);
+        this.cancelButton.setDisabled(false);
         break;
       case "paused":
         this.statusContainer.addClass("status-paused");
@@ -1297,6 +1381,7 @@ var RecordingModal = class extends import_obsidian3.Modal {
         this.startButton.setDisabled(false).setButtonText("\u25B6\uFE0F \u7EE7\u7EED\u5F55\u97F3");
         this.pauseButton.setDisabled(true);
         this.stopButton.setDisabled(false);
+        this.cancelButton.setDisabled(false);
         break;
       case "transcribing":
         this.statusContainer.addClass("status-recording");
@@ -1306,6 +1391,7 @@ var RecordingModal = class extends import_obsidian3.Modal {
         this.startButton.setDisabled(true);
         this.pauseButton.setDisabled(true);
         this.stopButton.setDisabled(true);
+        this.cancelButton.setDisabled(false).setButtonText("\u274C \u53D6\u6D88");
         break;
       case "processing":
         this.statusContainer.addClass("status-recording");
@@ -1315,6 +1401,7 @@ var RecordingModal = class extends import_obsidian3.Modal {
         this.startButton.setDisabled(true);
         this.pauseButton.setDisabled(true);
         this.stopButton.setDisabled(true);
+        this.cancelButton.setDisabled(false).setButtonText("\u274C \u53D6\u6D88");
         break;
       case "saving":
         this.statusContainer.addClass("status-recording");
@@ -1324,6 +1411,7 @@ var RecordingModal = class extends import_obsidian3.Modal {
         this.startButton.setDisabled(true);
         this.pauseButton.setDisabled(true);
         this.stopButton.setDisabled(true);
+        this.cancelButton.setDisabled(false).setButtonText("\u274C \u53D6\u6D88");
         break;
     }
   }
@@ -1354,6 +1442,8 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
     this.dashScopeClient = null;
     this.recordingModal = null;
     this.textProcessor = null;
+    // 取消状态管理
+    this.isProcessingCancelled = false;
   }
   async onload() {
     await this.loadSettings();
@@ -1413,12 +1503,14 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
       this.app,
       (audioBlob) => this.handleAudioData(audioBlob),
       (error) => this.handleRecordingError(error),
-      this.settings.enableLLMProcessing
+      this.settings.enableLLMProcessing,
+      () => this.handleRecordingCancel()
     );
     this.recordingModal.open();
   }
   async handleAudioData(audioBlob) {
     const processingStartTime = Date.now();
+    this.isProcessingCancelled = false;
     try {
       if (!this.dashScopeClient) {
         throw new Error("API\u5BA2\u6237\u7AEF\u672A\u521D\u59CB\u5316");
@@ -1431,6 +1523,10 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
       new import_obsidian4.Notice("\u6B63\u5728\u8C03\u7528AI\u8F6C\u5F55\u97F3\u9891...");
       console.log("\u5F00\u59CB\u8BED\u97F3\u8F6C\u5F55\u5904\u7406");
       const transcribedText = await this.dashScopeClient.processAudio(audioBlob);
+      if (this.isProcessingCancelled) {
+        console.log("\u8BED\u97F3\u8F6C\u5F55\u5DF2\u88AB\u7528\u6237\u53D6\u6D88");
+        return;
+      }
       console.log("\u8BED\u97F3\u8F6C\u5F55\u5B8C\u6210\uFF0C\u6587\u672C\u957F\u5EA6:", transcribedText.length);
       let processedContent;
       if (this.settings.enableLLMProcessing && this.textProcessor) {
@@ -1440,6 +1536,10 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
         new import_obsidian4.Notice("\u6B63\u5728\u4F7F\u7528AI\u4F18\u5316\u6587\u672C...");
         console.log("\u5F00\u59CBAI\u6587\u672C\u5904\u7406");
         processedContent = await this.textProcessor.processTranscribedText(transcribedText);
+        if (this.isProcessingCancelled) {
+          console.log("AI\u6587\u672C\u5904\u7406\u5DF2\u88AB\u7528\u6237\u53D6\u6D88");
+          return;
+        }
         console.log("AI\u6587\u672C\u5904\u7406\u5B8C\u6210\uFF0C\u662F\u5426\u5DF2\u5904\u7406:", processedContent.isProcessed);
       } else {
         processedContent = {
@@ -1451,6 +1551,10 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
       }
       if (this.recordingModal) {
         this.recordingModal.updateProcessingState("saving");
+      }
+      if (this.isProcessingCancelled) {
+        console.log("\u4FDD\u5B58\u7B14\u8BB0\u5DF2\u88AB\u7528\u6237\u53D6\u6D88");
+        return;
       }
       const processingDuration = Date.now() - processingStartTime;
       const metadata = {
@@ -1499,5 +1603,11 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
   handleRecordingError(error) {
     console.error("\u5F55\u97F3\u9519\u8BEF:", error);
     new import_obsidian4.Notice(`\u5F55\u97F3\u51FA\u9519: ${error.message}`);
+  }
+  handleRecordingCancel() {
+    console.log("\u7528\u6237\u53D6\u6D88\u4E86\u5F55\u97F3");
+    this.isProcessingCancelled = true;
+    this.recordingModal = null;
+    new import_obsidian4.Notice("\u5F55\u97F3\u5DF2\u53D6\u6D88");
   }
 };

@@ -12,6 +12,9 @@ export default class GetNotePlugin extends Plugin {
 	private noteGenerator: NoteGenerator;
 	private recordingModal: RecordingModal | null = null;
 	private textProcessor: TextProcessor | null = null;
+	
+	// 取消状态管理
+	private isProcessingCancelled: boolean = false;
 
 	async onload() {
 		await this.loadSettings();
@@ -92,7 +95,8 @@ export default class GetNotePlugin extends Plugin {
 			this.app,
 			(audioBlob) => this.handleAudioData(audioBlob),
 			(error) => this.handleRecordingError(error),
-			this.settings.enableLLMProcessing
+			this.settings.enableLLMProcessing,
+			() => this.handleRecordingCancel()
 		);
 		
 		this.recordingModal.open();
@@ -100,6 +104,9 @@ export default class GetNotePlugin extends Plugin {
 
 	private async handleAudioData(audioBlob: Blob) {
 		const processingStartTime = Date.now();
+		
+		// 重置取消状态
+		this.isProcessingCancelled = false;
 		
 		try {
 			if (!this.dashScopeClient) {
@@ -118,6 +125,13 @@ export default class GetNotePlugin extends Plugin {
 			console.log('开始语音转录处理');
 
 			const transcribedText = await this.dashScopeClient.processAudio(audioBlob);
+			
+			// 检查是否被取消
+			if (this.isProcessingCancelled) {
+				console.log('语音转录已被用户取消');
+				return;
+			}
+			
 			console.log('语音转录完成，文本长度:', transcribedText.length);
 
 			// 阶段2：AI文本处理（如果启用）
@@ -133,6 +147,13 @@ export default class GetNotePlugin extends Plugin {
 				console.log('开始AI文本处理');
 				
 				processedContent = await this.textProcessor.processTranscribedText(transcribedText);
+				
+				// 检查是否被取消
+				if (this.isProcessingCancelled) {
+					console.log('AI文本处理已被用户取消');
+					return;
+				}
+				
 				console.log('AI文本处理完成，是否已处理:', processedContent.isProcessed);
 			} else {
 				// 不启用AI处理，直接使用原始文本
@@ -147,6 +168,12 @@ export default class GetNotePlugin extends Plugin {
 			// 阶段3：保存笔记
 			if (this.recordingModal) {
 				this.recordingModal.updateProcessingState('saving');
+			}
+			
+			// 最后检查是否被取消
+			if (this.isProcessingCancelled) {
+				console.log('保存笔记已被用户取消');
+				return;
 			}
 			
 			// 计算处理时间
@@ -212,5 +239,15 @@ export default class GetNotePlugin extends Plugin {
 	private handleRecordingError(error: Error) {
 		console.error('录音错误:', error);
 		new Notice(`录音出错: ${error.message}`);
+	}
+
+	private handleRecordingCancel() {
+		console.log('用户取消了录音');
+		this.isProcessingCancelled = true;
+		
+		// 清理录音Modal引用
+		this.recordingModal = null;
+		
+		new Notice('录音已取消');
 	}
 }

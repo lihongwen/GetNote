@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is an Obsidian plugin project named "getnote-plugin" that converts voice input into transcribed text using AI. The plugin uses Alibaba Cloud's DashScope API with the qwen-audio-asr-latest model for accurate audio-to-text transcription.
 
-### Current Status (Phase 5 Complete - LLM Text Processing ✅)
+### Current Status (Phase 6 Complete - Cancel Confirmation ✅)
 - ✅ Basic plugin structure implemented
 - ✅ Audio recording functionality using Web Audio API
 - ✅ DashScope API integration with proper authentication
@@ -24,13 +24,18 @@ This is an Obsidian plugin project named "getnote-plugin" that converts voice in
 - ✅ Streamlined state management (idle/recording/paused)
 - ✅ Enhanced user experience with minimal cognitive load
 - ✅ Responsive design optimized for all devices
-- ✅ **NEW**: LLM text processing with qwen-plus-latest model
-- ✅ **NEW**: Automatic text optimization and grammar correction
-- ✅ **NEW**: AI-generated tags based on content analysis
-- ✅ **NEW**: Dual API testing (speech + text models)
-- ✅ **NEW**: Enhanced recording states (transcribing/processing/saving)
-- ✅ **NEW**: Fallback mechanism for LLM processing failures
-- ✅ **NEW**: Optional LLM processing with settings toggle
+- ✅ LLM text processing with qwen-plus-latest model
+- ✅ Automatic text optimization and grammar correction
+- ✅ AI-generated tags based on content analysis
+- ✅ Dual API testing (speech + text models)
+- ✅ Enhanced recording states (transcribing/processing/saving)
+- ✅ Fallback mechanism for LLM processing failures
+- ✅ Optional LLM processing with settings toggle
+- ✅ **NEW**: Smart cancel confirmation system
+- ✅ **NEW**: Close dialog with state-aware confirmation messages
+- ✅ **NEW**: Cancel button in recording interface
+- ✅ **NEW**: API processing cancellation mechanism
+- ✅ **NEW**: Graceful resource cleanup on cancel
 
 ### Key Features
 - 🎙️ **Voice Recording**: Uses MediaRecorder API with configurable quality settings
@@ -41,12 +46,14 @@ This is an Obsidian plugin project named "getnote-plugin" that converts voice in
 - ⚙️ **Settings UI**: API key management, model selection, output configuration, dual testing
 - 📁 **Organization**: Automatic saving to configurable vault folders with enhanced metadata
 - 🎯 **Smart Format**: Clean text transcription with AI optimization and structured notes
-- 🎨 **Simplified UI**: Three-button interface (Start/Pause/Stop) with processing states
+- 🎨 **Simplified UI**: Four-button interface (Start/Pause/Stop/Cancel) with processing states
 - ⏱️ **Clear Status**: Enhanced status indicators for recording/transcribing/processing/saving
-- 🌈 **Semantic Colors**: Green=Start, Orange=Pause, Red=Stop for immediate recognition
+- 🌈 **Semantic Colors**: Green=Start, Orange=Pause, Red=Stop, Gray=Cancel for immediate recognition
 - 📱 **Responsive Design**: Optimized for both desktop and mobile devices
 - ♿ **Accessibility**: Full keyboard navigation and high contrast support
 - 🔄 **Robust Processing**: Fallback mechanisms and retry logic for reliable operation
+- 🛡️ **Smart Cancellation**: State-aware confirmation dialogs prevent accidental data loss
+- 🔚 **Graceful Exit**: Clean resource cleanup and API cancellation on user abort
 
 ## Technical Requirements
 
@@ -219,18 +226,24 @@ Common plugin features:
 
 ## UI Design Features
 
-### Recording Modal Interface (Phase 4 - Simplified Design)
+### Recording Modal Interface (Phase 6 - With Cancel Confirmation)
 - **Clean Card Design**: Simple background with subtle shadows and rounded corners
 - **Status Indicator**: Small dot + descriptive text for current state
   - 🔘 Gray: Idle state (准备录音)
   - 🔴 Red pulsing: Recording active (正在录音...)  
   - 🟡 Orange blinking: Paused state (录音已暂停)
-- **Three Independent Buttons**: Fixed positions and clear functions
+  - 🔄 Blue rotating: Processing state (转录中/AI处理中/保存中)
+- **Four Independent Buttons**: Fixed positions and clear functions
   - 🟢 **Start Button**: Green, "🎤 开始录音" / "▶️ 继续录音"
   - 🟠 **Pause Button**: Orange, "⏸️ 暂停"
   - 🔴 **Stop Button**: Red, "⏹️ 停止"
+  - ⚪ **Cancel Button**: Gray, "❌ 取消"
 - **Time Display**: Large, monospace font with colon blinking during recording
-- **Simple State Logic**: Only 3 states (idle/recording/paused) for maximum clarity
+- **Enhanced State Logic**: 6 states (idle/recording/paused/transcribing/processing/saving)
+- **Smart Cancel Confirmation**: State-aware dialogs prevent accidental data loss
+  - Recording/Paused: "确定要取消录音吗？录音内容将会丢失"
+  - Processing: "正在处理录音，确定要取消吗？已录制内容将会丢失"
+  - Saving: "正在保存笔记，确定要取消吗？处理完成的内容可能丢失"
 - **Contextual Hints**: Dynamic help text that changes based on current state
 - **Responsive Layout**: Horizontal buttons on desktop, vertical stack on mobile
 - **Button Feedback**: Hover effects, disabled states, and press animations
@@ -283,6 +296,20 @@ Common plugin features:
 - [x] Semantic color scheme effectiveness
 - [x] Mobile responsiveness optimization
 - [x] Accessibility compliance validation
+
+### Phase 5 Testing (Completed ✅) - LLM Integration
+- [x] LLM text processing functionality
+- [x] AI tag generation accuracy
+- [x] Dual API testing (speech + text)
+- [x] Fallback mechanism reliability
+- [x] Settings UI and configuration
+
+### Phase 6 Testing (Completed ✅) - Cancel Confirmation
+- [x] Close button confirmation dialog
+- [x] Cancel button functionality
+- [x] State-aware confirmation messages
+- [x] API cancellation mechanism
+- [x] Resource cleanup verification
 
 ### Future Enhancement Ideas
 - [ ] Advanced note templates
