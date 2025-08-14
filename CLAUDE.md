@@ -62,107 +62,46 @@ This is an Obsidian plugin project named "getnote-plugin" that converts voice in
 - **API**: Depends on `obsidian.d.ts` TypeScript definitions with TSDoc comments
 - **Build System**: esbuild for compilation and bundling
 
-## Development Setup
+## Development Commands
 
-1. **Essential Files to Create:**
-   - `manifest.json` - Plugin metadata (required fields: id, name, version, minAppVersion, description, author)
-   - `main.ts` - Main plugin entry point extending Plugin class
-   - `package.json` - Dependencies and npm scripts
-   - `tsconfig.json` - TypeScript configuration
-   - `esbuild.config.mjs` - Build configuration
-   - `versions.json` - Version compatibility matrix
-   - `README.md` - Required for plugin submission
-   - `styles.css` - Optional styling
+Essential commands for this codebase:
 
-2. **Development Commands:**
-   ```bash
-   npm install              # Install dependencies
-   npm run dev              # Development build with watch mode
-   npm run build            # Production build
-   ```
+```bash
+# Setup
+npm install              # Install dependencies
+
+# Development  
+npm run dev              # Development build with watch mode (esbuild + watch)
+npm run build            # Production build (TypeScript check + esbuild production)
+
+# Version management
+npm run version          # Bump version and update manifest.json/versions.json
+```
+
+## TypeScript Configuration
+
+- **Target**: ES2017 (required for modern JavaScript features)
+- **Module**: ESNext with ES2018 esbuild compilation  
+- **Build**: esbuild for fast compilation, TypeScript for type checking only (`tsc -noEmit`)
+- **Hot Reload**: Available in development mode via `npm run dev`
 
 ## API Integration Details
 
-### DashScope API Configuration
-- **Endpoint**: `https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation`
-- **Model**: `qwen-audio-asr-latest` (专门用于语音转文字)
-- **Authentication**: Bearer token using API Key
-- **Request Format**: Simplified format with only audio input, no text prompts needed
-- **Content Types**: Supports audio (base64) - automatic transcription
+### DashScope API Integration
 
-### Audio Processing
-- **Supported Formats**: WAV, MP3, M4A, FLAC, OGG
-- **Size Limit**: 10MB maximum
-- **Encoding**: Base64 for API transmission
-- **Detection**: Automatic audio type detection from blob metadata
+This plugin integrates with **Alibaba Cloud's DashScope API** using two models:
 
-### Error Handling
-- **CORS Resolution**: Use `requestUrl()` instead of `fetch()`
-- **API Errors**: Detailed error messages with HTTP status codes
-- **Network Issues**: Retry logic and user-friendly error messages
-- **Validation**: API key format and audio file validation
+1. **Speech-to-Text**: `qwen-audio-asr-latest`
+   - Endpoint: `https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation`
+   - Input: Base64 encoded audio (WAV/MP3/M4A/FLAC/OGG, max 10MB)
+   - Output: Transcribed text
 
-## Plugin Manifest Structure
+2. **Text Processing**: `qwen-plus-latest` (optional)
+   - Same endpoint, different model parameter
+   - Input: Raw transcribed text
+   - Output: Optimized text + AI-generated tags
 
-Required `manifest.json` structure:
-```json
-{
-  "id": "plugin-id",           // Required: No "obsidian" in ID, keep short
-  "name": "Plugin Name",       // Required: Display name
-  "version": "1.0.0",          // Required: Semantic versioning
-  "minAppVersion": "0.15.0",   // Required: Minimum Obsidian version
-  "description": "Description", // Required: Used in plugin browser search
-  "author": "Author Name",     // Required: Plugin author
-  "authorUrl": "https://...",  // Optional: Author website
-  "fundingUrl": "https://...", // Optional: Donation/funding link
-  "isDesktopOnly": false       // Optional: true if NodeJS/CM5 required
-}
-```
-
-## Plugin Architecture
-
-- **Main Class**: Extends `Plugin` from `obsidian` module
-- **Entry Point**: `main.ts` exports the plugin class
-- **API Access**: Use Obsidian API for vault, UI, events, settings
-- **Build Output**: Compiles to `main.js` for Obsidian to load
-- **Hot Reload**: Requires Obsidian developer mode for development
-
-## Plugin Capabilities
-
-Common plugin features:
-- Add ribbon icons and commands
-- Create custom modals and settings tabs
-- Register global events and workspace events
-- Implement custom views and editor extensions
-- Add status bar items and context menus
-
-## Release and Submission Process
-
-1. **Pre-Release:**
-   - Update `manifest.json` version number
-   - Update `versions.json` with compatibility info
-   - Ensure README.md exists in repository root
-   - Run build and verify `main.js`, `styles.css` generated
-
-2. **GitHub Release:**
-   - Create release with tag matching manifest version exactly (no 'v' prefix)
-   - Upload `main.js`, `manifest.json`, `styles.css` as binary attachments
-   - Include release notes
-
-3. **Community Submission:**
-   - Fork https://github.com/obsidianmd/obsidian-releases
-   - Add plugin to end of `community-plugins.json` with unique ID
-   - Submit pull request and complete submission checklist
-   - ID in manifest must match ID in community-plugins.json
-
-## Development Best Practices
-
-- Check for existing similar plugins before development
-- Use ESLint for code quality
-- Follow semantic versioning
-- Support mobile devices (set `isDesktopOnly: false` unless using NodeJS)
-- Test on different Obsidian versions
-- Provide clear documentation and examples
+**Critical**: Must use Obsidian's `requestUrl()` instead of `fetch()` to avoid CORS issues.
 
 ## Project Structure
 
@@ -186,43 +125,34 @@ Common plugin features:
 └── styles.css          # Modern UI styles with animations
 ```
 
-## Architecture Components
+## Core Architecture
 
-### Main Plugin (`main.ts`)
-- Extends Obsidian's Plugin class
-- Integrates all components (recorder, API client, note generator, UI modal)
-- Manages plugin lifecycle and commands
-- Handles ribbon icons and recording modal
+The plugin follows a **modular architecture** with clear separation of concerns:
 
-### API Client (`src/api-client.ts`)
-- DashScope API integration with qwen-audio-asr-latest model
-- Simplified audio processing and base64 encoding
-- Error handling and connection testing
-- Support for multiple audio formats
+```
+main.ts                  # Plugin entry point, coordinates all modules
+├── src/api-client.ts    # DashScope API integration (audio + text models)  
+├── src/recorder.ts      # Web Audio API recording functionality
+├── src/recording-modal.ts # UI modal with 4-button interface (Start/Pause/Stop/Cancel)
+├── src/note-generator.ts # Markdown note creation and vault management
+├── src/text-processor.ts # LLM text optimization and tag generation
+└── src/settings.ts      # Plugin configuration UI and validation
+```
 
-### Audio Recorder (`src/recorder.ts`)
-- Web Audio API integration with pause/resume support
-- MediaRecorder with configurable quality
-- Permission handling and format detection
-- Real-time recording status and duration tracking
+### Key Architectural Patterns
 
-### Recording Modal (`src/recording-modal.ts`)
-- Modern UI interface with start/pause/stop controls
-- Real-time recording status indicators
-- Live time display with accurate duration calculation
-- State management for recording workflow
+1. **API Client Abstraction**: `DashScopeClient` handles both audio-to-text (qwen-audio-asr-latest) and text processing (qwen-plus-latest) models
+2. **State Management**: Recording modal manages 6 states (idle/recording/paused/transcribing/processing/saving) with cancel confirmation
+3. **Error Handling**: CORS resolved via Obsidian's `requestUrl()` method instead of `fetch()`
+4. **Cancellation Support**: API processing can be cancelled with proper resource cleanup
+5. **Fallback Mechanism**: LLM text processing failures fall back to original transcribed text
 
-### Note Generator (`src/note-generator.ts`)
-- Structured markdown note creation
-- Template system for different note types
-- Metadata and timestamp integration
-- Vault folder management
+### Data Flow
 
-### Settings UI (`src/settings.ts`)
-- API key configuration and validation
-- Audio quality and duration settings
-- Model selection (qwen-audio-asr variants)
-- Output folder configuration
+1. **Recording**: `AudioRecorder` → MediaRecorder blob → base64 encoding
+2. **API Processing**: Base64 audio → DashScope API → transcribed text 
+3. **Text Enhancement**: Raw text → TextProcessor (optional) → optimized text + tags
+4. **Note Creation**: `NoteGenerator` → structured markdown → vault save
 
 ## UI Design Features
 
@@ -335,36 +265,16 @@ Common plugin features:
 - **DashScope API**: https://bailian.console.aliyun.com/
 - **Official API Reference**: Model qwen-audio-turbo-latest documentation
 
-## Development Notes for Claude Code
+## Important Notes for Future Development
 
-### UI Design Philosophy (Phase 4)
-The plugin has evolved through multiple UI iterations and settled on a **simplified three-button approach** for optimal user experience:
+### Architecture Decisions
+- **UI Simplicity**: Current 4-button interface (Start/Pause/Stop/Cancel) is the result of user testing - avoid over-complicating
+- **API Integration**: DashScope requires specific `requestUrl()` usage due to Obsidian CORS restrictions
+- **Modular Design**: Each component (`recorder`, `api-client`, `note-generator`, etc.) handles distinct responsibilities
+- **Cancellation Support**: All async operations must support user cancellation with proper cleanup
 
-1. **Complexity Lessons Learned**: 
-   - Complex state machines (5+ states) created cognitive overhead
-   - Single primary button design confused users with changing labels
-   - Information bands and confirmation dialogs were over-engineered
-   - CSS design token systems added unnecessary abstraction
-
-2. **Current Simple Approach**:
-   - Three independent, fixed-function buttons (Start/Pause/Stop)
-   - Semantic color coding (Green/Orange/Red) for intuitive recognition
-   - Simple 3-state management (idle/recording/paused) only
-   - Clean visual hierarchy with minimal distractions
-
-### Development Guidelines
-1. **Maintain Simplicity**: Resist feature creep that complicates the core recording experience
-2. **Test API First**: Always verify DashScope connectivity before UI changes
-3. **Preserve Modularity**: Keep recorder, API client, and note generator as separate concerns
-4. **Update Documentation**: Keep this CLAUDE.md current with any architectural changes
-5. **Build & Test**: Run `npm run build` after changes to verify compilation
-6. **Git Hygiene**: Use descriptive commit messages documenting both what and why
-
-### Architecture Stability
-The current architecture represents a mature, user-tested design. Future enhancements should focus on:
-- Performance optimizations
-- Additional audio format support  
-- Note template customization
-- Bulk processing capabilities
-
-Avoid major UI restructuring unless based on clear user feedback indicating usability issues.
+### Key Constraints
+1. **CORS Limitation**: Cannot use standard `fetch()` - must use Obsidian's `requestUrl()`
+2. **Audio Processing**: 10MB limit, Base64 encoding required for API transmission  
+3. **State Management**: 6 processing states require careful coordination for cancel operations
+4. **LLM Fallback**: Text processing failures must gracefully fall back to raw transcription
