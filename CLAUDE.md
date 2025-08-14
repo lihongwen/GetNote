@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an Obsidian plugin project named "getnote-plugin" that converts voice input into structured notes using AI. The plugin uses Alibaba Cloud's DashScope API with the qwen-audio-turbo-latest model for audio transcription and note generation.
+This is an Obsidian plugin project named "getnote-plugin" that converts voice input into transcribed text using AI. The plugin uses Alibaba Cloud's DashScope API with the qwen-audio-asr-latest model for accurate audio-to-text transcription.
 
 ### Current Status (Phase 1 Complete ✅)
 - ✅ Basic plugin structure implemented
@@ -18,11 +18,11 @@ This is an Obsidian plugin project named "getnote-plugin" that converts voice in
 
 ### Key Features
 - 🎙️ **Voice Recording**: Uses MediaRecorder API with configurable quality settings
-- 🔗 **AI Integration**: Alibaba Cloud DashScope API for audio-to-text conversion
-- 📝 **Note Generation**: Structured markdown notes with customizable templates
+- 🔗 **AI Integration**: Alibaba Cloud DashScope API with qwen-audio-asr-latest for precise audio-to-text conversion
+- 📝 **Text Transcription**: Direct audio-to-text conversion without complex prompting
 - ⚙️ **Settings UI**: API key management, model selection, output configuration
 - 📁 **Organization**: Automatic saving to configurable vault folders
-- 🎯 **Templates**: Multiple note formats (meeting, idea, todo, general)
+- 🎯 **Simple Format**: Clean text transcription with metadata
 
 ## Technical Requirements
 
@@ -54,10 +54,10 @@ This is an Obsidian plugin project named "getnote-plugin" that converts voice in
 
 ### DashScope API Configuration
 - **Endpoint**: `https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation`
-- **Model**: `qwen-audio-turbo-latest`
+- **Model**: `qwen-audio-asr-latest` (专门用于语音转文字)
 - **Authentication**: Bearer token using API Key
-- **Request Format**: Must include `input` wrapper around `messages` array
-- **Content Types**: Supports audio (base64) + text prompts
+- **Request Format**: Simplified format with only audio input, no text prompts needed
+- **Content Types**: Supports audio (base64) - automatic transcription
 
 ### Audio Processing
 - **Supported Formats**: WAV, MP3, M4A, FLAC, OGG

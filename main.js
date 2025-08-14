@@ -150,32 +150,21 @@ var DashScopeClient = class {
     this.baseUrl = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation";
     this.apiKey = apiKey;
   }
-  async processAudio(audioBlob, prompt = "\u8BF7\u5C06\u8FD9\u6BB5\u97F3\u9891\u8F6C\u5F55\u4E3A\u6587\u672C\uFF0C\u5E76\u6574\u7406\u6210\u7ED3\u6784\u5316\u7684\u7B14\u8BB0\u683C\u5F0F") {
+  async processAudio(audioBlob, prompt = "") {
     var _a, _b, _c, _d, _e, _f;
     try {
       const audioType = this.detectAudioType(audioBlob);
       const audioBase64 = await this.blobToBase64(audioBlob);
       console.log(`\u5904\u7406\u97F3\u9891: \u7C7B\u578B=${audioType}, \u5927\u5C0F=${audioBlob.size}\u5B57\u8282`);
       const request = {
-        model: "qwen-audio-turbo-latest",
+        model: "qwen-audio-asr-latest",
         input: {
           messages: [
-            {
-              role: "system",
-              content: [
-                {
-                  text: "You are a helpful assistant."
-                }
-              ]
-            },
             {
               role: "user",
               content: [
                 {
                   audio: `data:${audioType};base64,${audioBase64}`
-                },
-                {
-                  text: prompt
                 }
               ]
             }
@@ -250,25 +239,14 @@ var DashScopeClient = class {
     try {
       console.log("\u5F00\u59CBAPI\u8FDE\u63A5\u6D4B\u8BD5...");
       const testRequest = {
-        model: "qwen-audio-turbo-latest",
+        model: "qwen-audio-asr-latest",
         input: {
           messages: [
-            {
-              role: "system",
-              content: [
-                {
-                  text: "You are a helpful assistant."
-                }
-              ]
-            },
             {
               role: "user",
               content: [
                 {
                   audio: "https://dashscope.oss-cn-beijing.aliyuncs.com/audios/welcome.mp3"
-                },
-                {
-                  text: "\u8FD9\u6BB5\u97F3\u9891\u5728\u8BF4\u4EC0\u4E48?"
                 }
               ]
             }
@@ -593,7 +571,7 @@ var NoteGenerator = class {
 var import_obsidian2 = require("obsidian");
 var DEFAULT_SETTINGS = {
   apiKey: "",
-  modelName: "qwen-audio-turbo-latest",
+  modelName: "qwen-audio-asr-latest",
   outputFolder: "GetNote",
   audioQuality: "medium",
   maxRecordingDuration: 300,
@@ -601,7 +579,7 @@ var DEFAULT_SETTINGS = {
   autoSave: true,
   includeTimestamp: true,
   includeMetadata: true,
-  promptTemplate: "\u8BF7\u5C06\u8FD9\u6BB5\u97F3\u9891\u5185\u5BB9\u6574\u7406\u6210\u7ED3\u6784\u5316\u7684\u7B14\u8BB0\u683C\u5F0F\uFF0C\u5305\u542B\u6807\u9898\u3001\u8981\u70B9\u548C\u8BE6\u7EC6\u8BF4\u660E\u3002\u4F7F\u7528Markdown\u683C\u5F0F\u3002",
+  promptTemplate: "\u8F6C\u5F55\u5B8C\u6210\u7684\u6587\u672C\u5C06\u81EA\u52A8\u6574\u7406\u6210\u7B14\u8BB0\u683C\u5F0F",
   noteTemplate: "general"
 };
 var GetNoteSettingTab = class extends import_obsidian2.PluginSettingTab {
@@ -629,7 +607,7 @@ var GetNoteSettingTab = class extends import_obsidian2.PluginSettingTab {
         this.apiTestResult.empty();
       }
     }));
-    new import_obsidian2.Setting(containerEl).setName("\u6A21\u578B\u540D\u79F0").setDesc("\u4F7F\u7528\u7684\u8BED\u97F3\u7406\u89E3\u6A21\u578B").addDropdown((dropdown) => dropdown.addOption("qwen-audio-turbo-latest", "Qwen Audio Turbo Latest").addOption("qwen-audio-turbo", "Qwen Audio Turbo").setValue(this.plugin.settings.modelName).onChange(async (value) => {
+    new import_obsidian2.Setting(containerEl).setName("\u6A21\u578B\u540D\u79F0").setDesc("\u4F7F\u7528\u7684\u8BED\u97F3\u8F6C\u6587\u5B57\u6A21\u578B").addDropdown((dropdown) => dropdown.addOption("qwen-audio-asr-latest", "Qwen Audio ASR Latest (\u8BED\u97F3\u8F6C\u6587\u5B57\u4E13\u7528)").addOption("qwen-audio-asr", "Qwen Audio ASR (\u8BED\u97F3\u8F6C\u6587\u5B57)").setValue(this.plugin.settings.modelName).onChange(async (value) => {
       this.plugin.settings.modelName = value;
       await this.plugin.saveSettings();
     }));
@@ -675,12 +653,12 @@ var GetNoteSettingTab = class extends import_obsidian2.PluginSettingTab {
       this.plugin.settings.noteTemplate = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian2.Setting(containerEl).setName("AI\u63D0\u793A\u8BCD\u6A21\u677F").setDesc("\u81EA\u5B9A\u4E49\u53D1\u9001\u7ED9AI\u7684\u63D0\u793A\u8BCD\uFF0C\u7528\u4E8E\u63A7\u5236\u8F93\u51FA\u683C\u5F0F").addTextArea((text) => text.setPlaceholder("\u8BF7\u5C06\u8FD9\u6BB5\u97F3\u9891\u5185\u5BB9\u6574\u7406\u6210\u7ED3\u6784\u5316\u7684\u7B14\u8BB0\u683C\u5F0F...").setValue(this.plugin.settings.promptTemplate).onChange(async (value) => {
+    new import_obsidian2.Setting(containerEl).setName("\u7B14\u8BB0\u683C\u5F0F\u8BF4\u660E").setDesc("qwen-audio-asr\u6A21\u578B\u4E13\u95E8\u7528\u4E8E\u8BED\u97F3\u8F6C\u6587\u5B57\uFF0C\u4F1A\u76F4\u63A5\u8F93\u51FA\u8F6C\u5F55\u6587\u672C\uFF0C\u65E0\u9700\u590D\u6742\u63D0\u793A\u8BCD").addTextArea((text) => text.setPlaceholder("\u8BED\u97F3\u8F6C\u6587\u5B57\u5B8C\u6210\u540E\uFF0C\u6587\u672C\u5C06\u81EA\u52A8\u6574\u7406\u4E3A\u7B14\u8BB0...").setValue(this.plugin.settings.promptTemplate).setDisabled(true).onChange(async (value) => {
       this.plugin.settings.promptTemplate = value || DEFAULT_SETTINGS.promptTemplate;
       await this.plugin.saveSettings();
     })).then((setting) => {
       var _a;
-      (_a = setting.controlEl.find("textarea")) == null ? void 0 : _a.setAttribute("rows", "4");
+      (_a = setting.controlEl.find("textarea")) == null ? void 0 : _a.setAttribute("rows", "2");
     });
   }
   createAdvancedSettings(containerEl) {

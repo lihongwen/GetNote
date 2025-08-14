@@ -17,14 +17,14 @@ export interface GetNoteSettings {
 
 export const DEFAULT_SETTINGS: GetNoteSettings = {
     apiKey: '',
-    modelName: 'qwen-audio-turbo-latest',
+    modelName: 'qwen-audio-asr-latest',
     outputFolder: 'GetNote',
     audioQuality: 'medium',
     maxRecordingDuration: 300, // 5分钟
     autoSave: true,
     includeTimestamp: true,
     includeMetadata: true,
-    promptTemplate: '请将这段音频内容整理成结构化的笔记格式，包含标题、要点和详细说明。使用Markdown格式。',
+    promptTemplate: '转录完成的文本将自动整理成笔记格式',
     noteTemplate: 'general'
 };
 
@@ -79,10 +79,10 @@ export class GetNoteSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('模型名称')
-            .setDesc('使用的语音理解模型')
+            .setDesc('使用的语音转文字模型')
             .addDropdown(dropdown => dropdown
-                .addOption('qwen-audio-turbo-latest', 'Qwen Audio Turbo Latest')
-                .addOption('qwen-audio-turbo', 'Qwen Audio Turbo')
+                .addOption('qwen-audio-asr-latest', 'Qwen Audio ASR Latest (语音转文字专用)')
+                .addOption('qwen-audio-asr', 'Qwen Audio ASR (语音转文字)')
                 .setValue(this.plugin.settings.modelName)
                 .onChange(async (value) => {
                     this.plugin.settings.modelName = value;
@@ -196,17 +196,18 @@ export class GetNoteSettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('AI提示词模板')
-            .setDesc('自定义发送给AI的提示词，用于控制输出格式')
+            .setName('笔记格式说明')
+            .setDesc('qwen-audio-asr模型专门用于语音转文字，会直接输出转录文本，无需复杂提示词')
             .addTextArea(text => text
-                .setPlaceholder('请将这段音频内容整理成结构化的笔记格式...')
+                .setPlaceholder('语音转文字完成后，文本将自动整理为笔记...')
                 .setValue(this.plugin.settings.promptTemplate)
+                .setDisabled(true) // 禁用编辑，因为ASR模型不需要提示词
                 .onChange(async (value) => {
                     this.plugin.settings.promptTemplate = value || DEFAULT_SETTINGS.promptTemplate;
                     await this.plugin.saveSettings();
                 }))
             .then(setting => {
-                setting.controlEl.find('textarea')?.setAttribute('rows', '4');
+                setting.controlEl.find('textarea')?.setAttribute('rows', '2');
             });
     }
 

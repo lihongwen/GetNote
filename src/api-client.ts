@@ -45,7 +45,7 @@ export class DashScopeClient {
         this.apiKey = apiKey;
     }
 
-    async processAudio(audioBlob: Blob, prompt: string = '请将这段音频转录为文本，并整理成结构化的笔记格式'): Promise<string> {
+    async processAudio(audioBlob: Blob, prompt: string = ''): Promise<string> {
         try {
             // 检测音频类型并转换为base64
             const audioType = this.detectAudioType(audioBlob);
@@ -53,26 +53,16 @@ export class DashScopeClient {
             
             console.log(`处理音频: 类型=${audioType}, 大小=${audioBlob.size}字节`);
             
+            // qwen-audio-asr-latest 专门用于语音转文字，使用简化的请求格式
             const request: DashScopeRequest = {
-                model: 'qwen-audio-turbo-latest',
+                model: 'qwen-audio-asr-latest',
                 input: {
                     messages: [
-                        {
-                            role: 'system',
-                            content: [
-                                {
-                                    text: "You are a helpful assistant."
-                                }
-                            ]
-                        },
                         {
                             role: 'user',
                             content: [
                                 {
                                     audio: `data:${audioType};base64,${audioBase64}`
-                                },
-                                {
-                                    text: prompt
                                 }
                             ]
                         }
@@ -164,27 +154,16 @@ export class DashScopeClient {
         try {
             console.log('开始API连接测试...');
             
-            // 使用官方文档中的测试音频URL进行测试
+            // 使用官方文档中的测试音频URL进行测试 - qwen-audio-asr专门用于语音转文字
             const testRequest: DashScopeRequest = {
-                model: 'qwen-audio-turbo-latest',
+                model: 'qwen-audio-asr-latest',
                 input: {
                     messages: [
-                        {
-                            role: 'system',
-                            content: [
-                                {
-                                    text: "You are a helpful assistant."
-                                }
-                            ]
-                        },
                         {
                             role: 'user',
                             content: [
                                 {
                                     audio: "https://dashscope.oss-cn-beijing.aliyuncs.com/audios/welcome.mp3"
-                                },
-                                {
-                                    text: "这段音频在说什么?"
                                 }
                             ]
                         }
