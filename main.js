@@ -182,6 +182,7 @@ var import_obsidian = require("obsidian");
 var DashScopeClient = class {
   constructor(apiKey) {
     this.baseUrl = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation";
+    this.compatibleUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions";
     this.apiKey = apiKey;
   }
   async processAudio(audioBlob, prompt = "") {
@@ -369,6 +370,134 @@ var DashScopeClient = class {
     };
     return prompts[scenario] || prompts.notes;
   }
+  // 使用文本模型处理转录文本
+  async processTextWithLLM(transcribedText, model = "qwen-plus-latest") {
+    try {
+      console.log(`\u4F7F\u7528${model}\u6A21\u578B\u5904\u7406\u6587\u672C\uFF0C\u957F\u5EA6: ${transcribedText.length}\u5B57\u7B26`);
+      const [processedText, tags] = await Promise.all([
+        this.improveText(transcribedText, model),
+        this.generateTags(transcribedText, model)
+      ]);
+      return {
+        processedText,
+        tags
+      };
+    } catch (error) {
+      console.error("LLM\u6587\u672C\u5904\u7406\u5931\u8D25:", error);
+      throw new Error(`\u6587\u672C\u5904\u7406\u5931\u8D25: ${error.message}`);
+    }
+  }
+  // 文本整理和优化
+  async improveText(text, model) {
+    var _a, _b;
+    const request = {
+      model,
+      messages: [
+        {
+          role: "system",
+          content: "\u4F60\u662F\u4E00\u4E2A\u4E13\u4E1A\u7684\u6587\u672C\u7F16\u8F91\u52A9\u624B\u3002\u8BF7\u5BF9\u7528\u6237\u63D0\u4F9B\u7684\u8BED\u97F3\u8F6C\u5F55\u6587\u672C\u8FDB\u884C\u6574\u7406\u548C\u4F18\u5316\uFF0C\u8981\u6C42\uFF1A1. \u4FEE\u6B63\u8BED\u6CD5\u9519\u8BEF\u548C\u53E3\u8BED\u5316\u8868\u8FBE 2. \u4FDD\u6301\u539F\u59CB\u5185\u5BB9\u7684\u5B8C\u6574\u6027\u548C\u539F\u610F 3. \u4F18\u5316\u8868\u8FBE\u65B9\u5F0F\uFF0C\u4F7F\u5176\u66F4\u52A0\u6E05\u6670\u6613\u8BFB 4. \u4FDD\u6301\u903B\u8F91\u7ED3\u6784\u548C\u91CD\u8981\u4FE1\u606F\u4E0D\u53D8 5. \u4F7F\u7528\u89C4\u8303\u7684\u6807\u70B9\u7B26\u53F7 6. \u8F93\u51FA\u683C\u5F0F\u4E3A\u89C4\u6574\u7684\u4E2D\u6587\u6587\u672C"
+        },
+        {
+          role: "user",
+          content: `\u8BF7\u5BF9\u4EE5\u4E0B\u8BED\u97F3\u8F6C\u5F55\u6587\u672C\u8FDB\u884C\u6574\u7406\u548C\u4F18\u5316\uFF1A
+
+${text}`
+        }
+      ]
+    };
+    const response = await this.callCompatibleAPI(request);
+    return ((_b = (_a = response.choices[0]) == null ? void 0 : _a.message) == null ? void 0 : _b.content) || text;
+  }
+  // 生成相关标签
+  async generateTags(text, model) {
+    var _a, _b;
+    const request = {
+      model,
+      messages: [
+        {
+          role: "system",
+          content: "\u4F60\u662F\u4E00\u4E2A\u4E13\u4E1A\u7684\u5185\u5BB9\u5206\u6790\u52A9\u624B\u3002\u8BF7\u5206\u6790\u7528\u6237\u63D0\u4F9B\u7684\u6587\u672C\u5185\u5BB9\uFF0C\u751F\u62103-5\u4E2A\u76F8\u5173\u7684\u6807\u7B7E\u3002\u8981\u6C42\uFF1A1. \u6807\u7B7E\u5E94\u8BE5\u51C6\u786E\u53CD\u6620\u6587\u672C\u7684\u4E3B\u8981\u5185\u5BB9\u548C\u4E3B\u9898 2. \u4F7F\u7528\u7B80\u6D01\u7684\u4E2D\u6587\u8BCD\u6C47 3. \u907F\u514D\u8FC7\u4E8E\u5BBD\u6CDB\u6216\u8FC7\u4E8E\u5177\u4F53\u7684\u6807\u7B7E 4. \u6807\u7B7E\u4E4B\u95F4\u7528\u9017\u53F7\u5206\u9694 5. \u4E0D\u9700\u8981\u6DFB\u52A0#\u7B26\u53F7\uFF0C\u53EA\u8F93\u51FA\u6807\u7B7E\u6587\u5B57"
+        },
+        {
+          role: "user",
+          content: `\u8BF7\u4E3A\u4EE5\u4E0B\u6587\u672C\u751F\u6210\u76F8\u5173\u6807\u7B7E\uFF1A
+
+${text}`
+        }
+      ]
+    };
+    const response = await this.callCompatibleAPI(request);
+    const tagsText = ((_b = (_a = response.choices[0]) == null ? void 0 : _a.message) == null ? void 0 : _b.content) || "";
+    return tagsText.split(/[,，、]/).map((tag) => tag.trim()).filter((tag) => tag.length > 0).slice(0, 5);
+  }
+  // 调用兼容模式API
+  async callCompatibleAPI(request) {
+    console.log("\u8C03\u7528\u517C\u5BB9\u6A21\u5F0FAPI:", this.compatibleUrl);
+    console.log("\u8BF7\u6C42\u53C2\u6570:", JSON.stringify(request, null, 2));
+    const response = await (0, import_obsidian.requestUrl)({
+      url: this.compatibleUrl,
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${this.apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(request),
+      throw: false
+    });
+    console.log("\u517C\u5BB9\u6A21\u5F0FAPI\u54CD\u5E94\u72B6\u6001:", response.status);
+    if (response.status >= 400) {
+      console.error("\u517C\u5BB9\u6A21\u5F0FAPI\u9519\u8BEF:", response.text);
+      throw new Error(`\u517C\u5BB9\u6A21\u5F0FAPI\u8BF7\u6C42\u5931\u8D25 (${response.status}): ${response.text}`);
+    }
+    const data = response.json;
+    console.log("\u517C\u5BB9\u6A21\u5F0FAPI\u54CD\u5E94\u6570\u636E:", JSON.stringify(data, null, 2));
+    if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+      throw new Error("\u517C\u5BB9\u6A21\u5F0FAPI\u8FD4\u56DE\u6570\u636E\u683C\u5F0F\u5F02\u5E38");
+    }
+    return data;
+  }
+  // 测试文本LLM连接
+  async testTextLLM(model = "qwen-plus-latest") {
+    var _a, _b, _c;
+    try {
+      console.log(`\u5F00\u59CB\u6587\u672CLLM\u6D4B\u8BD5\uFF0C\u6A21\u578B: ${model}`);
+      const testRequest = {
+        model,
+        messages: [
+          {
+            role: "system",
+            content: "\u4F60\u662F\u4E00\u4E2A\u6709\u7528\u7684\u52A9\u624B\u3002"
+          },
+          {
+            role: "user",
+            content: "\u8BF7\u7B80\u5355\u4ECB\u7ECD\u4E00\u4E0B\u4F60\u81EA\u5DF1"
+          }
+        ]
+      };
+      const response = await this.callCompatibleAPI(testRequest);
+      if ((_c = (_b = (_a = response.choices) == null ? void 0 : _a[0]) == null ? void 0 : _b.message) == null ? void 0 : _c.content) {
+        console.log("\u6587\u672CLLM\u6D4B\u8BD5\u6210\u529F\uFF0C\u54CD\u5E94:", response.choices[0].message.content);
+        return { success: true };
+      } else {
+        return {
+          success: false,
+          error: "\u54CD\u5E94\u683C\u5F0F\u5F02\u5E38"
+        };
+      }
+    } catch (error) {
+      console.error("\u6587\u672CLLM\u6D4B\u8BD5\u5931\u8D25:", error);
+      let errorMessage = "\u672A\u77E5\u9519\u8BEF";
+      if (error instanceof TypeError && error.message === "Failed to fetch") {
+        errorMessage = "\u7F51\u7EDC\u8FDE\u63A5\u5931\u8D25";
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      return {
+        success: false,
+        error: errorMessage
+      };
+    }
+  }
 };
 
 // src/note-generator.ts
@@ -377,27 +506,56 @@ var NoteGenerator = class {
     this.app = app;
   }
   /**
-   * 生成笔记内容
+   * 生成笔记内容（新版本，支持AI处理结果）
    */
-  generateNoteContent(aiResponse, metadata, includeMetadata = true) {
-    const { title, timestamp, duration, model } = metadata;
+  generateNoteContentWithAI(processedContent, metadata, includeMetadata = true) {
+    const { title, timestamp, duration, model, textModel, isProcessed } = metadata;
     let content = "";
     content += `# ${title}
 
 `;
+    if (processedContent.tags && processedContent.tags.length > 0) {
+      content += this.formatTagsForObsidian(processedContent.tags) + "\n\n";
+    } else {
+      content += "#\u8BED\u97F3\u7B14\u8BB0\n\n";
+    }
     if (includeMetadata) {
       content += `\u521B\u5EFA\u65F6\u95F4: ${timestamp.toLocaleString()}`;
       if (duration) {
         content += ` | \u65F6\u957F: ${duration}`;
       }
-      content += ` | ${model}
-
-`;
+      content += ` | \u8BED\u97F3\u6A21\u578B: ${model}`;
+      if (processedContent.isProcessed && textModel) {
+        content += ` | \u6587\u672C\u6A21\u578B: ${textModel}`;
+      }
+      content += "\n\n";
     }
-    content += this.formatAIResponse(aiResponse);
+    if (processedContent.isProcessed) {
+      content += "> \u2705 \u6B64\u5185\u5BB9\u5DF2\u901A\u8FC7AI\u4F18\u5316\u5904\u7406\n\n";
+    }
+    const textToUse = processedContent.isProcessed ? processedContent.processedText : processedContent.originalText;
+    content += "## \u5185\u5BB9\n\n";
+    content += this.formatAIResponse(textToUse);
     content += "\n\n";
-    content += "#\u8BED\u97F3\u7B14\u8BB0\n";
+    if (processedContent.isProcessed && processedContent.originalText !== processedContent.processedText) {
+      content += "## \u539F\u59CB\u8F6C\u5F55\n\n";
+      content += "> \u539F\u59CB\u8BED\u97F3\u8F6C\u5F55\u5185\u5BB9\n\n";
+      content += processedContent.originalText;
+      content += "\n\n";
+    }
     return content;
+  }
+  /**
+   * 生成笔记内容（向后兼容版本）
+   */
+  generateNoteContent(aiResponse, metadata, includeMetadata = true) {
+    const processedContent = {
+      originalText: aiResponse,
+      processedText: aiResponse,
+      tags: [],
+      isProcessed: false
+    };
+    return this.generateNoteContentWithAI(processedContent, metadata, includeMetadata);
   }
   /**
    * 格式化AI响应内容
@@ -473,6 +631,18 @@ var NoteGenerator = class {
       counter++;
     }
     return testPath;
+  }
+  /**
+   * 格式化标签为Obsidian格式
+   */
+  formatTagsForObsidian(tags) {
+    if (!tags || tags.length === 0)
+      return "#\u8BED\u97F3\u7B14\u8BB0";
+    const formattedTags = tags.filter((tag) => tag.trim().length > 0).map((tag) => `#${tag.trim().replace(/\s+/g, "_")}`).join(" ");
+    if (!formattedTags.includes("#\u8BED\u97F3\u7B14\u8BB0")) {
+      return `${formattedTags} #\u8BED\u97F3\u7B14\u8BB0`;
+    }
+    return formattedTags;
   }
   /**
    * 格式化文件大小
@@ -571,6 +741,166 @@ var NoteGenerator = class {
 
 // src/settings.ts
 var import_obsidian2 = require("obsidian");
+
+// src/text-processor.ts
+var TextProcessor = class {
+  constructor(apiKey, settings) {
+    this.client = new DashScopeClient(apiKey);
+    this.settings = settings;
+  }
+  /**
+   * 处理转录文本 - 主要入口点
+   * @param transcribedText 原始转录文本
+   * @returns 处理结果包含优化后的文本和标签
+   */
+  async processTranscribedText(transcribedText) {
+    if (!this.settings.enableLLMProcessing) {
+      return {
+        originalText: transcribedText,
+        processedText: transcribedText,
+        tags: [],
+        isProcessed: false
+      };
+    }
+    try {
+      console.log("\u5F00\u59CBLLM\u6587\u672C\u5904\u7406...");
+      const result = await this.processWithRetry(transcribedText);
+      return {
+        originalText: transcribedText,
+        processedText: result.processedText,
+        tags: result.tags,
+        isProcessed: true
+      };
+    } catch (error) {
+      console.error("LLM\u5904\u7406\u5931\u8D25\uFF0C\u4F7F\u7528\u539F\u59CB\u6587\u672C:", error);
+      return {
+        originalText: transcribedText,
+        processedText: transcribedText,
+        tags: [],
+        isProcessed: false
+      };
+    }
+  }
+  /**
+   * 带重试机制的文本处理
+   */
+  async processWithRetry(text) {
+    let lastError = null;
+    for (let attempt = 1; attempt <= this.settings.maxRetries; attempt++) {
+      try {
+        console.log(`\u6587\u672C\u5904\u7406\u5C1D\u8BD5 ${attempt}/${this.settings.maxRetries}`);
+        const result = await this.client.processTextWithLLM(
+          text,
+          this.settings.textModel
+        );
+        console.log("\u6587\u672C\u5904\u7406\u6210\u529F");
+        return result;
+      } catch (error) {
+        lastError = error;
+        console.error(`\u6587\u672C\u5904\u7406\u5C1D\u8BD5 ${attempt} \u5931\u8D25:`, error);
+        if (attempt < this.settings.maxRetries) {
+          await this.delay(1e3 * attempt);
+        }
+      }
+    }
+    throw lastError || new Error("\u6587\u672C\u5904\u7406\u5931\u8D25");
+  }
+  /**
+   * 测试LLM连接
+   */
+  async testLLMConnection() {
+    try {
+      return await this.client.testTextLLM(this.settings.textModel);
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+  /**
+   * 更新设置
+   */
+  updateSettings(newSettings) {
+    this.settings = { ...this.settings, ...newSettings };
+  }
+  /**
+   * 获取当前设置
+   */
+  getSettings() {
+    return { ...this.settings };
+  }
+  /**
+   * 验证文本是否适合处理
+   */
+  validateText(text) {
+    if (!text || text.trim().length === 0) {
+      return { valid: false, reason: "\u6587\u672C\u4E3A\u7A7A" };
+    }
+    if (text.length < 10) {
+      return { valid: false, reason: "\u6587\u672C\u8FC7\u77ED\uFF0C\u4E0D\u9700\u8981\u5904\u7406" };
+    }
+    if (text.length > 1e4) {
+      return { valid: false, reason: "\u6587\u672C\u8FC7\u957F\uFF0C\u8D85\u51FA\u5904\u7406\u9650\u5236" };
+    }
+    return { valid: true };
+  }
+  /**
+   * 获取支持的模型列表
+   */
+  getSupportedModels() {
+    return [
+      {
+        id: "qwen-plus-latest",
+        name: "Qwen Plus Latest",
+        description: "\u9AD8\u8D28\u91CF\u6587\u672C\u5904\u7406\uFF0C\u63A8\u8350\u4F7F\u7528"
+      },
+      {
+        id: "qwen-turbo-latest",
+        name: "Qwen Turbo Latest",
+        description: "\u5FEB\u901F\u6587\u672C\u5904\u7406\uFF0C\u6210\u672C\u8F83\u4F4E"
+      },
+      {
+        id: "qwen-max-latest",
+        name: "Qwen Max Latest",
+        description: "\u6700\u9AD8\u8D28\u91CF\u6587\u672C\u5904\u7406\uFF0C\u6210\u672C\u8F83\u9AD8"
+      }
+    ];
+  }
+  /**
+   * 延迟辅助函数
+   */
+  delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+  /**
+   * 格式化标签为Obsidian格式
+   */
+  formatTagsForObsidian(tags) {
+    if (!tags || tags.length === 0)
+      return "";
+    return tags.filter((tag) => tag.trim().length > 0).map((tag) => `#${tag.trim().replace(/\s+/g, "_")}`).join(" ");
+  }
+  /**
+   * 生成处理摘要信息
+   */
+  generateProcessingSummary(result) {
+    const lines = [];
+    if (result.isProcessed) {
+      lines.push("\u2705 \u6587\u672C\u5DF2\u901A\u8FC7AI\u5904\u7406\u4F18\u5316");
+      lines.push(`\u{1F4CA} \u539F\u59CB\u957F\u5EA6: ${result.originalText.length}\u5B57\u7B26`);
+      lines.push(`\u{1F4CA} \u5904\u7406\u540E\u957F\u5EA6: ${result.processedText.length}\u5B57\u7B26`);
+      if (result.tags.length > 0) {
+        lines.push(`\u{1F3F7}\uFE0F \u751F\u6210\u6807\u7B7E: ${result.tags.length}\u4E2A`);
+      }
+    } else {
+      lines.push("\u{1F4DD} \u4F7F\u7528\u539F\u59CB\u8F6C\u5F55\u6587\u672C");
+    }
+    return lines.join("\n");
+  }
+};
+
+// src/settings.ts
 var DEFAULT_SETTINGS = {
   apiKey: "",
   modelName: "qwen-audio-asr-latest",
@@ -582,12 +912,19 @@ var DEFAULT_SETTINGS = {
   includeTimestamp: true,
   includeMetadata: true,
   promptTemplate: "\u8F6C\u5F55\u5B8C\u6210\u7684\u6587\u672C\u5C06\u81EA\u52A8\u6574\u7406\u6210\u7B14\u8BB0\u683C\u5F0F",
-  noteTemplate: "general"
+  noteTemplate: "general",
+  // LLM文本处理默认设置
+  enableLLMProcessing: false,
+  textModel: "qwen-plus-latest",
+  processOriginalText: true,
+  generateTags: true,
+  maxRetries: 2
 };
 var GetNoteSettingTab = class extends import_obsidian2.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.apiTestResult = null;
+    this.textLLMTestResult = null;
     this.plugin = plugin;
   }
   display() {
@@ -595,6 +932,7 @@ var GetNoteSettingTab = class extends import_obsidian2.PluginSettingTab {
     containerEl.empty();
     containerEl.createEl("h2", { text: "GetNote \u63D2\u4EF6\u8BBE\u7F6E" });
     this.createApiSettings(containerEl);
+    this.createLLMSettings(containerEl);
     this.createRecordingSettings(containerEl);
     this.createOutputSettings(containerEl);
     this.createTemplateSettings(containerEl);
@@ -617,6 +955,40 @@ var GetNoteSettingTab = class extends import_obsidian2.PluginSettingTab {
       await this.testApiConnection(button.buttonEl);
     }));
     this.apiTestResult = apiTestSetting.settingEl.createDiv("api-test-result");
+  }
+  createLLMSettings(containerEl) {
+    containerEl.createEl("h3", { text: "\u{1F916} AI\u6587\u672C\u5904\u7406\u8BBE\u7F6E" });
+    new import_obsidian2.Setting(containerEl).setName("\u542F\u7528AI\u6587\u672C\u5904\u7406").setDesc("\u4F7F\u7528AI\u6A21\u578B\u5BF9\u8BED\u97F3\u8F6C\u5F55\u6587\u672C\u8FDB\u884C\u4F18\u5316\u548C\u6807\u7B7E\u751F\u6210").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableLLMProcessing).onChange(async (value) => {
+      this.plugin.settings.enableLLMProcessing = value;
+      await this.plugin.saveSettings();
+      this.display();
+    }));
+    if (this.plugin.settings.enableLLMProcessing) {
+      new import_obsidian2.Setting(containerEl).setName("\u6587\u672C\u5904\u7406\u6A21\u578B").setDesc("\u9009\u62E9\u7528\u4E8E\u6587\u672C\u5904\u7406\u7684AI\u6A21\u578B").addDropdown((dropdown) => dropdown.addOption("qwen-plus-latest", "Qwen Plus Latest (\u63A8\u8350)").addOption("qwen-turbo-latest", "Qwen Turbo Latest (\u5FEB\u901F)").addOption("qwen-max-latest", "Qwen Max Latest (\u9AD8\u8D28\u91CF)").setValue(this.plugin.settings.textModel).onChange(async (value) => {
+        this.plugin.settings.textModel = value;
+        await this.plugin.saveSettings();
+        if (this.textLLMTestResult) {
+          this.textLLMTestResult.empty();
+        }
+      }));
+      new import_obsidian2.Setting(containerEl).setName("\u6587\u672C\u4F18\u5316").setDesc("\u5BF9\u539F\u59CB\u8F6C\u5F55\u6587\u672C\u8FDB\u884C\u8BED\u6CD5\u4F18\u5316\u548C\u8868\u8FBE\u6539\u8FDB").addToggle((toggle) => toggle.setValue(this.plugin.settings.processOriginalText).onChange(async (value) => {
+        this.plugin.settings.processOriginalText = value;
+        await this.plugin.saveSettings();
+      }));
+      new import_obsidian2.Setting(containerEl).setName("\u81EA\u52A8\u751F\u6210\u6807\u7B7E").setDesc("\u6839\u636E\u6587\u672C\u5185\u5BB9\u81EA\u52A8\u751F\u6210\u76F8\u5173\u6807\u7B7E").addToggle((toggle) => toggle.setValue(this.plugin.settings.generateTags).onChange(async (value) => {
+        this.plugin.settings.generateTags = value;
+        await this.plugin.saveSettings();
+      }));
+      new import_obsidian2.Setting(containerEl).setName("\u91CD\u8BD5\u6B21\u6570").setDesc("AI\u5904\u7406\u5931\u8D25\u65F6\u7684\u91CD\u8BD5\u6B21\u6570").addText((text) => text.setPlaceholder("2").setValue(this.plugin.settings.maxRetries.toString()).onChange(async (value) => {
+        const retries = parseInt(value) || 2;
+        this.plugin.settings.maxRetries = Math.max(1, Math.min(5, retries));
+        await this.plugin.saveSettings();
+      }));
+      const textLLMTestSetting = new import_obsidian2.Setting(containerEl).setName("\u6587\u672CAI\u6D4B\u8BD5").setDesc("\u6D4B\u8BD5\u6587\u672C\u5904\u7406AI\u6A21\u578B\u662F\u5426\u6B63\u5E38\u5DE5\u4F5C").addButton((button) => button.setButtonText("\u6D4B\u8BD5\u6587\u672CAI").setCta().onClick(async () => {
+        await this.testTextLLM(button.buttonEl);
+      }));
+      this.textLLMTestResult = textLLMTestSetting.settingEl.createDiv("text-llm-test-result");
+    }
   }
   createRecordingSettings(containerEl) {
     containerEl.createEl("h3", { text: "\u{1F399}\uFE0F \u5F55\u97F3\u8BBE\u7F6E" });
@@ -706,10 +1078,59 @@ var GetNoteSettingTab = class extends import_obsidian2.PluginSettingTab {
       buttonEl.disabled = false;
     }
   }
+  async testTextLLM(buttonEl) {
+    if (!this.plugin.settings.apiKey.trim()) {
+      this.showTextLLMTestResult("\u8BF7\u5148\u8F93\u5165API Key", "error");
+      return;
+    }
+    buttonEl.setText("\u6D4B\u8BD5\u4E2D...");
+    buttonEl.disabled = true;
+    try {
+      console.log("\u5F00\u59CB\u6587\u672CLLM\u6D4B\u8BD5\uFF0C\u6A21\u578B:", this.plugin.settings.textModel);
+      const textProcessor = new TextProcessor(this.plugin.settings.apiKey, {
+        enableLLMProcessing: true,
+        textModel: this.plugin.settings.textModel,
+        processOriginalText: this.plugin.settings.processOriginalText,
+        generateTags: this.plugin.settings.generateTags,
+        maxRetries: this.plugin.settings.maxRetries
+      });
+      const result = await textProcessor.testLLMConnection();
+      if (result.success) {
+        this.showTextLLMTestResult("\u2705 \u6587\u672CAI\u8FDE\u63A5\u6210\u529F\uFF01", "success");
+        console.log("\u6587\u672CLLM\u6D4B\u8BD5\u6210\u529F");
+      } else {
+        const errorMsg = result.error || "\u672A\u77E5\u9519\u8BEF";
+        this.showTextLLMTestResult(`\u274C \u6587\u672CAI\u8FDE\u63A5\u5931\u8D25: ${errorMsg}`, "error");
+        console.error("\u6587\u672CLLM\u6D4B\u8BD5\u5931\u8D25:", errorMsg);
+      }
+    } catch (error) {
+      const errorMsg = `\u6587\u672CAI\u6D4B\u8BD5\u5F02\u5E38: ${error.message}`;
+      this.showTextLLMTestResult(`\u274C ${errorMsg}`, "error");
+      console.error("\u6587\u672CLLM\u6D4B\u8BD5\u5F02\u5E38:", error);
+    } finally {
+      buttonEl.setText("\u6D4B\u8BD5\u6587\u672CAI");
+      buttonEl.disabled = false;
+    }
+  }
   showTestResult(message, type) {
     if (this.apiTestResult) {
       this.apiTestResult.empty();
       const resultEl = this.apiTestResult.createDiv();
+      resultEl.setText(message);
+      resultEl.addClass(`test-result-${type}`);
+      if (type === "success") {
+        resultEl.style.color = "#10b981";
+      } else {
+        resultEl.style.color = "#ef4444";
+      }
+      resultEl.style.marginTop = "8px";
+      resultEl.style.fontSize = "14px";
+    }
+  }
+  showTextLLMTestResult(message, type) {
+    if (this.textLLMTestResult) {
+      this.textLLMTestResult.empty();
+      const resultEl = this.textLLMTestResult.createDiv();
       resultEl.setText(message);
       resultEl.addClass(`test-result-${type}`);
       if (type === "success") {
@@ -737,13 +1158,16 @@ var GetNoteSettingTab = class extends import_obsidian2.PluginSettingTab {
 // src/recording-modal.ts
 var import_obsidian3 = require("obsidian");
 var RecordingModal = class extends import_obsidian3.Modal {
-  constructor(app, onRecordingComplete, onError) {
+  constructor(app, onRecordingComplete, onError, enableLLMProcessing = false) {
     super(app);
     this.audioRecorder = null;
     this.state = "idle";
     this.timerInterval = null;
+    // Processing state
+    this.enableLLMProcessing = false;
     this.onRecordingComplete = onRecordingComplete;
     this.onError = onError;
+    this.enableLLMProcessing = enableLLMProcessing;
   }
   onOpen() {
     const { contentEl } = this;
@@ -769,9 +1193,8 @@ var RecordingModal = class extends import_obsidian3.Modal {
     const stopButtonEl = buttonGroup.createEl("button");
     stopButtonEl.addClass("stop-btn");
     this.stopButton = new import_obsidian3.ButtonComponent(stopButtonEl).setButtonText("\u23F9\uFE0F \u505C\u6B62").setDisabled(true).onClick(() => this.handleStop());
-    this.hintText = container.createEl("div", {
-      text: "\u70B9\u51FB\u5F00\u59CB\u5F55\u97F3\uFF0C\u5F55\u97F3\u5B8C\u6210\u540E\u5C06\u81EA\u52A8\u8F6C\u6362\u4E3A\u6587\u5B57\u7B14\u8BB0"
-    });
+    const hintText = this.enableLLMProcessing ? "\u70B9\u51FB\u5F00\u59CB\u5F55\u97F3\uFF0C\u5B8C\u6210\u540E\u5C06\u8FDB\u884CAI\u8F6C\u5F55\u548C\u6587\u672C\u4F18\u5316" : "\u70B9\u51FB\u5F00\u59CB\u5F55\u97F3\uFF0C\u5F55\u97F3\u5B8C\u6210\u540E\u5C06\u81EA\u52A8\u8F6C\u6362\u4E3A\u6587\u5B57\u7B14\u8BB0";
+    this.hintText = container.createEl("div", { text: hintText });
     this.hintText.addClass("simple-hint");
     this.updateUI();
   }
@@ -829,8 +1252,9 @@ var RecordingModal = class extends import_obsidian3.Modal {
         clearInterval(this.timerInterval);
         this.timerInterval = null;
       }
-      this.close();
+      this.setState("transcribing");
       await this.onRecordingComplete(audioBlob);
+      this.close();
     } catch (error) {
       this.setState("idle");
       this.onError(error);
@@ -851,7 +1275,7 @@ var RecordingModal = class extends import_obsidian3.Modal {
       case "idle":
         this.statusContainer.addClass("status-idle");
         this.statusText.textContent = "\u51C6\u5907\u5F55\u97F3";
-        this.hintText.textContent = "\u70B9\u51FB\u5F00\u59CB\u5F55\u97F3\uFF0C\u5F55\u97F3\u5B8C\u6210\u540E\u5C06\u81EA\u52A8\u8F6C\u6362\u4E3A\u6587\u5B57\u7B14\u8BB0";
+        this.hintText.textContent = this.enableLLMProcessing ? "\u70B9\u51FB\u5F00\u59CB\u5F55\u97F3\uFF0C\u5B8C\u6210\u540E\u5C06\u8FDB\u884CAI\u8F6C\u5F55\u548C\u6587\u672C\u4F18\u5316" : "\u70B9\u51FB\u5F00\u59CB\u5F55\u97F3\uFF0C\u5F55\u97F3\u5B8C\u6210\u540E\u5C06\u81EA\u52A8\u8F6C\u6362\u4E3A\u6587\u5B57\u7B14\u8BB0";
         this.startButton.setDisabled(false).setButtonText("\u{1F3A4} \u5F00\u59CB\u5F55\u97F3");
         this.pauseButton.setDisabled(true);
         this.stopButton.setDisabled(true);
@@ -874,6 +1298,33 @@ var RecordingModal = class extends import_obsidian3.Modal {
         this.pauseButton.setDisabled(true);
         this.stopButton.setDisabled(false);
         break;
+      case "transcribing":
+        this.statusContainer.addClass("status-recording");
+        this.statusText.textContent = "\u{1F504} \u6B63\u5728\u8F6C\u5F55...";
+        this.timeDisplay.removeClass("recording");
+        this.hintText.textContent = "\u6B63\u5728\u5C06\u8BED\u97F3\u8F6C\u6362\u4E3A\u6587\u5B57\uFF0C\u8BF7\u7A0D\u5019...";
+        this.startButton.setDisabled(true);
+        this.pauseButton.setDisabled(true);
+        this.stopButton.setDisabled(true);
+        break;
+      case "processing":
+        this.statusContainer.addClass("status-recording");
+        this.statusText.textContent = "\u{1F916} AI\u5904\u7406\u4E2D...";
+        this.timeDisplay.removeClass("recording");
+        this.hintText.textContent = "\u6B63\u5728\u4F7F\u7528AI\u4F18\u5316\u6587\u672C\u5185\u5BB9\u548C\u751F\u6210\u6807\u7B7E\uFF0C\u8BF7\u7A0D\u5019...";
+        this.startButton.setDisabled(true);
+        this.pauseButton.setDisabled(true);
+        this.stopButton.setDisabled(true);
+        break;
+      case "saving":
+        this.statusContainer.addClass("status-recording");
+        this.statusText.textContent = "\u{1F4BE} \u4FDD\u5B58\u4E2D...";
+        this.timeDisplay.removeClass("recording");
+        this.hintText.textContent = "\u6B63\u5728\u4FDD\u5B58\u7B14\u8BB0\u5230\u60A8\u7684\u5E93\u4E2D...";
+        this.startButton.setDisabled(true);
+        this.pauseButton.setDisabled(true);
+        this.stopButton.setDisabled(true);
+        break;
     }
   }
   startTimer() {
@@ -890,6 +1341,10 @@ var RecordingModal = class extends import_obsidian3.Modal {
     const seconds = totalSeconds % 60;
     return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
   }
+  // 公共方法：允许外部更新处理状态
+  updateProcessingState(state) {
+    this.setState(state);
+  }
 };
 
 // main.ts
@@ -898,6 +1353,7 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
     super(...arguments);
     this.dashScopeClient = null;
     this.recordingModal = null;
+    this.textProcessor = null;
   }
   async onload() {
     await this.loadSettings();
@@ -935,6 +1391,13 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
   updateDashScopeClient() {
     if (this.settings.apiKey) {
       this.dashScopeClient = new DashScopeClient(this.settings.apiKey);
+      this.textProcessor = new TextProcessor(this.settings.apiKey, {
+        enableLLMProcessing: this.settings.enableLLMProcessing,
+        textModel: this.settings.textModel,
+        processOriginalText: this.settings.processOriginalText,
+        generateTags: this.settings.generateTags,
+        maxRetries: this.settings.maxRetries
+      });
     }
   }
   openRecordingModal() {
@@ -949,7 +1412,8 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
     this.recordingModal = new RecordingModal(
       this.app,
       (audioBlob) => this.handleAudioData(audioBlob),
-      (error) => this.handleRecordingError(error)
+      (error) => this.handleRecordingError(error),
+      this.settings.enableLLMProcessing
     );
     this.recordingModal.open();
   }
@@ -965,19 +1429,45 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
         return;
       }
       new import_obsidian4.Notice("\u6B63\u5728\u8C03\u7528AI\u8F6C\u5F55\u97F3\u9891...");
-      const aiResponse = await this.dashScopeClient.processAudio(audioBlob);
+      console.log("\u5F00\u59CB\u8BED\u97F3\u8F6C\u5F55\u5904\u7406");
+      const transcribedText = await this.dashScopeClient.processAudio(audioBlob);
+      console.log("\u8BED\u97F3\u8F6C\u5F55\u5B8C\u6210\uFF0C\u6587\u672C\u957F\u5EA6:", transcribedText.length);
+      let processedContent;
+      if (this.settings.enableLLMProcessing && this.textProcessor) {
+        if (this.recordingModal) {
+          this.recordingModal.updateProcessingState("processing");
+        }
+        new import_obsidian4.Notice("\u6B63\u5728\u4F7F\u7528AI\u4F18\u5316\u6587\u672C...");
+        console.log("\u5F00\u59CBAI\u6587\u672C\u5904\u7406");
+        processedContent = await this.textProcessor.processTranscribedText(transcribedText);
+        console.log("AI\u6587\u672C\u5904\u7406\u5B8C\u6210\uFF0C\u662F\u5426\u5DF2\u5904\u7406:", processedContent.isProcessed);
+      } else {
+        processedContent = {
+          originalText: transcribedText,
+          processedText: transcribedText,
+          tags: [],
+          isProcessed: false
+        };
+      }
+      if (this.recordingModal) {
+        this.recordingModal.updateProcessingState("saving");
+      }
       const processingDuration = Date.now() - processingStartTime;
       const metadata = {
-        title: this.noteGenerator.extractTitleFromContent(aiResponse),
+        title: this.noteGenerator.extractTitleFromContent(
+          processedContent.isProcessed ? processedContent.processedText : processedContent.originalText
+        ),
         timestamp: new Date(),
         duration: "\u97F3\u9891\u8F6C\u5F55",
         // 由于使用Modal，录音时长在Modal中管理
         audioSize: this.noteGenerator.formatFileSize(audioBlob.size),
         processingTime: this.noteGenerator.formatDuration(processingDuration),
-        model: this.settings.modelName
+        model: this.settings.modelName,
+        textModel: this.settings.enableLLMProcessing ? this.settings.textModel : void 0,
+        isProcessed: processedContent.isProcessed
       };
-      const noteContent = this.noteGenerator.generateNoteContent(
-        aiResponse,
+      const noteContent = this.noteGenerator.generateNoteContentWithAI(
+        processedContent,
         metadata,
         this.settings.includeMetadata
       );
@@ -988,13 +1478,22 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
           this.settings.outputFolder,
           fileName
         );
-        new import_obsidian4.Notice(`\u8F6C\u5F55\u5B8C\u6210\uFF0C\u7B14\u8BB0\u5DF2\u4FDD\u5B58: ${savedFile.name}`);
+        if (processedContent.isProcessed) {
+          new import_obsidian4.Notice(`AI\u5904\u7406\u5B8C\u6210\uFF01\u7B14\u8BB0\u5DF2\u4FDD\u5B58: ${savedFile.name}\uFF0C\u5305\u542B${processedContent.tags.length}\u4E2A\u6807\u7B7E`);
+        } else {
+          new import_obsidian4.Notice(`\u8F6C\u5F55\u5B8C\u6210\uFF0C\u7B14\u8BB0\u5DF2\u4FDD\u5B58: ${savedFile.name}`);
+        }
+        console.log("\u7B14\u8BB0\u4FDD\u5B58\u5B8C\u6210:", savedFile.path);
       } else {
-        new import_obsidian4.Notice("\u97F3\u9891\u8F6C\u5F55\u5B8C\u6210\uFF0C\u8BF7\u624B\u52A8\u4FDD\u5B58\u7B14\u8BB0");
+        const message = processedContent.isProcessed ? "AI\u6587\u672C\u5904\u7406\u5B8C\u6210\uFF0C\u8BF7\u624B\u52A8\u4FDD\u5B58\u7B14\u8BB0" : "\u97F3\u9891\u8F6C\u5F55\u5B8C\u6210\uFF0C\u8BF7\u624B\u52A8\u4FDD\u5B58\u7B14\u8BB0";
+        new import_obsidian4.Notice(message);
       }
     } catch (error) {
       console.error("\u5904\u7406\u97F3\u9891\u65F6\u51FA\u9519:", error);
       new import_obsidian4.Notice(`\u5904\u7406\u97F3\u9891\u65F6\u51FA\u9519: ${error.message}`);
+      if (this.recordingModal) {
+        this.recordingModal.close();
+      }
     }
   }
   handleRecordingError(error) {

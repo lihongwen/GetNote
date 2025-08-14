@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is an Obsidian plugin project named "getnote-plugin" that converts voice input into transcribed text using AI. The plugin uses Alibaba Cloud's DashScope API with the qwen-audio-asr-latest model for accurate audio-to-text transcription.
 
-### Current Status (Phase 4 Complete - UI Simplified ✅)
+### Current Status (Phase 5 Complete - LLM Text Processing ✅)
 - ✅ Basic plugin structure implemented
 - ✅ Audio recording functionality using Web Audio API
 - ✅ DashScope API integration with proper authentication
@@ -19,24 +19,34 @@ This is an Obsidian plugin project named "getnote-plugin" that converts voice in
 - ✅ Complete recording UI with start/pause/stop controls
 - ✅ Modern, beautiful interface design with animations
 - ✅ Real-time recording status and time display
-- ✅ **FINAL**: Simplified three-button UI design (极简三按钮界面)
-- ✅ **FINAL**: Semantic color scheme with intuitive button meanings
-- ✅ **FINAL**: Streamlined state management (idle/recording/paused)
-- ✅ **FINAL**: Enhanced user experience with minimal cognitive load
-- ✅ **FINAL**: Responsive design optimized for all devices
+- ✅ Simplified three-button UI design (极简三按钮界面)
+- ✅ Semantic color scheme with intuitive button meanings
+- ✅ Streamlined state management (idle/recording/paused)
+- ✅ Enhanced user experience with minimal cognitive load
+- ✅ Responsive design optimized for all devices
+- ✅ **NEW**: LLM text processing with qwen-plus-latest model
+- ✅ **NEW**: Automatic text optimization and grammar correction
+- ✅ **NEW**: AI-generated tags based on content analysis
+- ✅ **NEW**: Dual API testing (speech + text models)
+- ✅ **NEW**: Enhanced recording states (transcribing/processing/saving)
+- ✅ **NEW**: Fallback mechanism for LLM processing failures
+- ✅ **NEW**: Optional LLM processing with settings toggle
 
 ### Key Features
 - 🎙️ **Voice Recording**: Uses MediaRecorder API with configurable quality settings
 - 🔗 **AI Integration**: Alibaba Cloud DashScope API with qwen-audio-asr-latest for precise audio-to-text conversion
 - 📝 **Text Transcription**: Direct audio-to-text conversion without complex prompting
-- ⚙️ **Settings UI**: API key management, model selection, output configuration
-- 📁 **Organization**: Automatic saving to configurable vault folders
-- 🎯 **Simple Format**: Clean text transcription with metadata
-- 🎨 **Simplified UI**: Three-button interface (Start/Pause/Stop) with intuitive design
-- ⏱️ **Clear Status**: Simple dot indicator + text for current recording state
+- 🤖 **LLM Text Processing**: Optional AI text optimization using qwen-plus-latest model
+- 🏷️ **Auto Tag Generation**: AI-powered content analysis and tag creation
+- ⚙️ **Settings UI**: API key management, model selection, output configuration, dual testing
+- 📁 **Organization**: Automatic saving to configurable vault folders with enhanced metadata
+- 🎯 **Smart Format**: Clean text transcription with AI optimization and structured notes
+- 🎨 **Simplified UI**: Three-button interface (Start/Pause/Stop) with processing states
+- ⏱️ **Clear Status**: Enhanced status indicators for recording/transcribing/processing/saving
 - 🌈 **Semantic Colors**: Green=Start, Orange=Pause, Red=Stop for immediate recognition
 - 📱 **Responsive Design**: Optimized for both desktop and mobile devices
 - ♿ **Accessibility**: Full keyboard navigation and high contrast support
+- 🔄 **Robust Processing**: Fallback mechanisms and retry logic for reliable operation
 
 ## Technical Requirements
 
@@ -160,11 +170,12 @@ Common plugin features:
 ├── CLAUDE.md           # Development guidance for Claude Code
 ├── data.json           # Plugin settings storage
 ├── src/
-│   ├── api-client.ts    # DashScope API integration
+│   ├── api-client.ts    # DashScope API integration (speech + text models)
 │   ├── recorder.ts      # Audio recording functionality (with pause/resume)
-│   ├── note-generator.ts # Note creation and formatting
-│   ├── settings.ts      # Plugin settings UI
-│   └── recording-modal.ts # Recording control UI interface
+│   ├── note-generator.ts # Note creation and formatting (with AI enhancements)
+│   ├── settings.ts      # Plugin settings UI (dual API testing)
+│   ├── recording-modal.ts # Recording control UI interface (processing states)
+│   └── text-processor.ts # LLM text processing and optimization
 └── styles.css          # Modern UI styles with animations
 ```
 

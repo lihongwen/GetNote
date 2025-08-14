@@ -1,6 +1,7 @@
 import { App, PluginSettingTab, Setting, Notice } from 'obsidian';
 import GetNotePlugin from '../main';
 import { DashScopeClient } from './api-client';
+import { TextProcessor, TextProcessorSettings, DEFAULT_TEXT_PROCESSOR_SETTINGS } from './text-processor';
 
 export interface GetNoteSettings {
     apiKey: string;
@@ -13,6 +14,12 @@ export interface GetNoteSettings {
     includeMetadata: boolean;
     promptTemplate: string;
     noteTemplate: 'meeting' | 'idea' | 'todo' | 'general';
+    // LLM文本处理设置
+    enableLLMProcessing: boolean;
+    textModel: string;
+    processOriginalText: boolean;
+    generateTags: boolean;
+    maxRetries: number;
 }
 
 export const DEFAULT_SETTINGS: GetNoteSettings = {
@@ -25,12 +32,19 @@ export const DEFAULT_SETTINGS: GetNoteSettings = {
     includeTimestamp: true,
     includeMetadata: true,
     promptTemplate: '转录完成的文本将自动整理成笔记格式',
-    noteTemplate: 'general'
+    noteTemplate: 'general',
+    // LLM文本处理默认设置
+    enableLLMProcessing: false,
+    textModel: 'qwen-plus-latest',
+    processOriginalText: true,
+    generateTags: true,
+    maxRetries: 2
 };
 
 export class GetNoteSettingTab extends PluginSettingTab {
     plugin: GetNotePlugin;
     private apiTestResult: HTMLElement | null = null;
+    private textLLMTestResult: HTMLElement | null = null;
 
     constructor(app: App, plugin: GetNotePlugin) {
         super(app, plugin);
@@ -45,6 +59,9 @@ export class GetNoteSettingTab extends PluginSettingTab {
 
         // API设置部分
         this.createApiSettings(containerEl);
+
+        // LLM文本处理设置部分
+        this.createLLMSettings(containerEl);
 
         // 录音设置部分  
         this.createRecordingSettings(containerEl);
@@ -102,6 +119,89 @@ export class GetNoteSettingTab extends PluginSettingTab {
 
         // 测试结果显示区域
         this.apiTestResult = apiTestSetting.settingEl.createDiv('api-test-result');
+    }
+
+    private createLLMSettings(containerEl: HTMLElement): void {
+        containerEl.createEl('h3', { text: '🤖 AI文本处理设置' });
+
+        // LLM功能开关
+        new Setting(containerEl)
+            .setName('启用AI文本处理')
+            .setDesc('使用AI模型对语音转录文本进行优化和标签生成')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.enableLLMProcessing)
+                .onChange(async (value) => {
+                    this.plugin.settings.enableLLMProcessing = value;
+                    await this.plugin.saveSettings();
+                    // 重新显示设置页面以更新相关设置的可见性
+                    this.display();
+                }));
+
+        // 只有启用LLM处理时才显示以下设置
+        if (this.plugin.settings.enableLLMProcessing) {
+            new Setting(containerEl)
+                .setName('文本处理模型')
+                .setDesc('选择用于文本处理的AI模型')
+                .addDropdown(dropdown => dropdown
+                    .addOption('qwen-plus-latest', 'Qwen Plus Latest (推荐)')
+                    .addOption('qwen-turbo-latest', 'Qwen Turbo Latest (快速)')
+                    .addOption('qwen-max-latest', 'Qwen Max Latest (高质量)')
+                    .setValue(this.plugin.settings.textModel)
+                    .onChange(async (value) => {
+                        this.plugin.settings.textModel = value;
+                        await this.plugin.saveSettings();
+                        // 清除文本LLM测试结果
+                        if (this.textLLMTestResult) {
+                            this.textLLMTestResult.empty();
+                        }
+                    }));
+
+            new Setting(containerEl)
+                .setName('文本优化')
+                .setDesc('对原始转录文本进行语法优化和表达改进')
+                .addToggle(toggle => toggle
+                    .setValue(this.plugin.settings.processOriginalText)
+                    .onChange(async (value) => {
+                        this.plugin.settings.processOriginalText = value;
+                        await this.plugin.saveSettings();
+                    }));
+
+            new Setting(containerEl)
+                .setName('自动生成标签')
+                .setDesc('根据文本内容自动生成相关标签')
+                .addToggle(toggle => toggle
+                    .setValue(this.plugin.settings.generateTags)
+                    .onChange(async (value) => {
+                        this.plugin.settings.generateTags = value;
+                        await this.plugin.saveSettings();
+                    }));
+
+            new Setting(containerEl)
+                .setName('重试次数')
+                .setDesc('AI处理失败时的重试次数')
+                .addText(text => text
+                    .setPlaceholder('2')
+                    .setValue(this.plugin.settings.maxRetries.toString())
+                    .onChange(async (value) => {
+                        const retries = parseInt(value) || 2;
+                        this.plugin.settings.maxRetries = Math.max(1, Math.min(5, retries));
+                        await this.plugin.saveSettings();
+                    }));
+
+            // 文本LLM测试按钮
+            const textLLMTestSetting = new Setting(containerEl)
+                .setName('文本AI测试')
+                .setDesc('测试文本处理AI模型是否正常工作')
+                .addButton(button => button
+                    .setButtonText('测试文本AI')
+                    .setCta()
+                    .onClick(async () => {
+                        await this.testTextLLM(button.buttonEl);
+                    }));
+
+            // 文本LLM测试结果显示区域
+            this.textLLMTestResult = textLLMTestSetting.settingEl.createDiv('text-llm-test-result');
+        }
     }
 
     private createRecordingSettings(containerEl: HTMLElement): void {
@@ -275,10 +375,68 @@ export class GetNoteSettingTab extends PluginSettingTab {
         }
     }
 
+    private async testTextLLM(buttonEl: HTMLButtonElement): Promise<void> {
+        if (!this.plugin.settings.apiKey.trim()) {
+            this.showTextLLMTestResult('请先输入API Key', 'error');
+            return;
+        }
+
+        buttonEl.setText('测试中...');
+        buttonEl.disabled = true;
+
+        try {
+            console.log('开始文本LLM测试，模型:', this.plugin.settings.textModel);
+            
+            const textProcessor = new TextProcessor(this.plugin.settings.apiKey, {
+                enableLLMProcessing: true,
+                textModel: this.plugin.settings.textModel,
+                processOriginalText: this.plugin.settings.processOriginalText,
+                generateTags: this.plugin.settings.generateTags,
+                maxRetries: this.plugin.settings.maxRetries
+            });
+
+            const result = await textProcessor.testLLMConnection();
+            
+            if (result.success) {
+                this.showTextLLMTestResult('✅ 文本AI连接成功！', 'success');
+                console.log('文本LLM测试成功');
+            } else {
+                const errorMsg = result.error || '未知错误';
+                this.showTextLLMTestResult(`❌ 文本AI连接失败: ${errorMsg}`, 'error');
+                console.error('文本LLM测试失败:', errorMsg);
+            }
+        } catch (error) {
+            const errorMsg = `文本AI测试异常: ${error.message}`;
+            this.showTextLLMTestResult(`❌ ${errorMsg}`, 'error');
+            console.error('文本LLM测试异常:', error);
+        } finally {
+            buttonEl.setText('测试文本AI');
+            buttonEl.disabled = false;
+        }
+    }
+
     private showTestResult(message: string, type: 'success' | 'error'): void {
         if (this.apiTestResult) {
             this.apiTestResult.empty();
             const resultEl = this.apiTestResult.createDiv();
+            resultEl.setText(message);
+            resultEl.addClass(`test-result-${type}`);
+            
+            // 添加简单的样式
+            if (type === 'success') {
+                resultEl.style.color = '#10b981';
+            } else {
+                resultEl.style.color = '#ef4444';
+            }
+            resultEl.style.marginTop = '8px';
+            resultEl.style.fontSize = '14px';
+        }
+    }
+
+    private showTextLLMTestResult(message: string, type: 'success' | 'error'): void {
+        if (this.textLLMTestResult) {
+            this.textLLMTestResult.empty();
+            const resultEl = this.textLLMTestResult.createDiv();
             resultEl.setText(message);
             resultEl.addClass(`test-result-${type}`);
             

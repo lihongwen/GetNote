@@ -1,7 +1,7 @@
 import { Modal, App, ButtonComponent, Notice } from 'obsidian';
 import { AudioRecorder } from './recorder';
 
-export type RecordingState = 'idle' | 'recording' | 'paused';
+export type RecordingState = 'idle' | 'recording' | 'paused' | 'transcribing' | 'processing' | 'saving';
 
 export class RecordingModal extends Modal {
     private audioRecorder: AudioRecorder | null = null;
@@ -21,15 +21,20 @@ export class RecordingModal extends Modal {
     // Callbacks
     private onRecordingComplete: (audioBlob: Blob) => Promise<void>;
     private onError: (error: Error) => void;
+    
+    // Processing state
+    private enableLLMProcessing: boolean = false;
 
     constructor(
         app: App, 
         onRecordingComplete: (audioBlob: Blob) => Promise<void>,
-        onError: (error: Error) => void
+        onError: (error: Error) => void,
+        enableLLMProcessing: boolean = false
     ) {
         super(app);
         this.onRecordingComplete = onRecordingComplete;
         this.onError = onError;
+        this.enableLLMProcessing = enableLLMProcessing;
     }
 
     onOpen() {
@@ -84,9 +89,10 @@ export class RecordingModal extends Modal {
             .onClick(() => this.handleStop());
         
         // 提示文字
-        this.hintText = container.createEl('div', { 
-            text: '点击开始录音，录音完成后将自动转换为文字笔记' 
-        });
+        const hintText = this.enableLLMProcessing 
+            ? '点击开始录音，完成后将进行AI转录和文本优化'
+            : '点击开始录音，录音完成后将自动转换为文字笔记';
+        this.hintText = container.createEl('div', { text: hintText });
         this.hintText.addClass('simple-hint');
         
         // 设置初始状态
@@ -167,11 +173,14 @@ export class RecordingModal extends Modal {
                 this.timerInterval = null;
             }
             
-            // 关闭Modal
-            this.close();
+            // 显示处理状态
+            this.setState('transcribing');
             
             // 调用回调处理录音数据
             await this.onRecordingComplete(audioBlob);
+            
+            // 完成后关闭Modal
+            this.close();
             
         } catch (error) {
             this.setState('idle');
@@ -199,7 +208,9 @@ export class RecordingModal extends Modal {
             case 'idle':
                 this.statusContainer.addClass('status-idle');
                 this.statusText.textContent = '准备录音';
-                this.hintText.textContent = '点击开始录音，录音完成后将自动转换为文字笔记';
+                this.hintText.textContent = this.enableLLMProcessing 
+                    ? '点击开始录音，完成后将进行AI转录和文本优化'
+                    : '点击开始录音，录音完成后将自动转换为文字笔记';
                 
                 // 按钮状态
                 this.startButton.setDisabled(false).setButtonText('🎤 开始录音');
@@ -230,6 +241,42 @@ export class RecordingModal extends Modal {
                 this.pauseButton.setDisabled(true);
                 this.stopButton.setDisabled(false);
                 break;
+                
+            case 'transcribing':
+                this.statusContainer.addClass('status-recording'); // 使用录音状态的样式
+                this.statusText.textContent = '🔄 正在转录...';
+                this.timeDisplay.removeClass('recording');
+                this.hintText.textContent = '正在将语音转换为文字，请稍候...';
+                
+                // 禁用所有按钮
+                this.startButton.setDisabled(true);
+                this.pauseButton.setDisabled(true);
+                this.stopButton.setDisabled(true);
+                break;
+                
+            case 'processing':
+                this.statusContainer.addClass('status-recording'); // 使用录音状态的样式
+                this.statusText.textContent = '🤖 AI处理中...';
+                this.timeDisplay.removeClass('recording');
+                this.hintText.textContent = '正在使用AI优化文本内容和生成标签，请稍候...';
+                
+                // 禁用所有按钮
+                this.startButton.setDisabled(true);
+                this.pauseButton.setDisabled(true);
+                this.stopButton.setDisabled(true);
+                break;
+                
+            case 'saving':
+                this.statusContainer.addClass('status-recording'); // 使用录音状态的样式
+                this.statusText.textContent = '💾 保存中...';
+                this.timeDisplay.removeClass('recording');
+                this.hintText.textContent = '正在保存笔记到您的库中...';
+                
+                // 禁用所有按钮
+                this.startButton.setDisabled(true);
+                this.pauseButton.setDisabled(true);
+                this.stopButton.setDisabled(true);
+                break;
         }
     }
 
@@ -247,5 +294,10 @@ export class RecordingModal extends Modal {
         const minutes = Math.floor(totalSeconds / 60);
         const seconds = totalSeconds % 60;
         return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    }
+
+    // 公共方法：允许外部更新处理状态
+    public updateProcessingState(state: 'transcribing' | 'processing' | 'saving') {
+        this.setState(state);
     }
 } 

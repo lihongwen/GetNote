@@ -8,5 +8,10 @@
   "includeTimestamp": true,
   "includeMetadata": true,
   "promptTemplate": "这段音频在说什么？？",
-  "noteTemplate": "general"
+  "noteTemplate": "general",
+  "enableLLMProcessing": true,
+  "textModel": "qwen-plus-latest",
+  "processOriginalText": true,
+  "generateTags": true,
+  "maxRetries": 2
 }

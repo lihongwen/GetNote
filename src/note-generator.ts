@@ -7,25 +7,41 @@ export interface NoteMetadata {
     audioSize?: string;
     processingTime?: string;
     model: string;
+    textModel?: string; // AI文本处理模型
+    isProcessed?: boolean; // 是否经过AI处理
+}
+
+export interface ProcessedContent {
+    originalText: string;
+    processedText: string;
+    tags: string[];
+    isProcessed: boolean;
 }
 
 export class NoteGenerator {
     constructor(private app: App) {}
 
     /**
-     * 生成笔记内容
+     * 生成笔记内容（新版本，支持AI处理结果）
      */
-    generateNoteContent(
-        aiResponse: string, 
+    generateNoteContentWithAI(
+        processedContent: ProcessedContent,
         metadata: NoteMetadata,
         includeMetadata: boolean = true
     ): string {
-        const { title, timestamp, duration, model } = metadata;
+        const { title, timestamp, duration, model, textModel, isProcessed } = metadata;
         
         let content = '';
 
         // 添加标题
         content += `# ${title}\n\n`;
+
+        // 添加AI生成的标签（如果有）
+        if (processedContent.tags && processedContent.tags.length > 0) {
+            content += this.formatTagsForObsidian(processedContent.tags) + '\n\n';
+        } else {
+            content += '#语音笔记\n\n';
+        }
 
         // 简化的元数据（可选）
         if (includeMetadata) {
@@ -33,17 +49,52 @@ export class NoteGenerator {
             if (duration) {
                 content += ` | 时长: ${duration}`;
             }
-            content += ` | ${model}\n\n`;
+            content += ` | 语音模型: ${model}`;
+            if (processedContent.isProcessed && textModel) {
+                content += ` | 文本模型: ${textModel}`;
+            }
+            content += '\n\n';
         }
 
-        // 添加内容（无多余格式）
-        content += this.formatAIResponse(aiResponse);
+        // 添加处理状态说明
+        if (processedContent.isProcessed) {
+            content += '> ✅ 此内容已通过AI优化处理\n\n';
+        }
+
+        // 添加处理后的内容
+        const textToUse = processedContent.isProcessed ? processedContent.processedText : processedContent.originalText;
+        content += '## 内容\n\n';
+        content += this.formatAIResponse(textToUse);
         content += '\n\n';
 
-        // 简单标签
-        content += '#语音笔记\n';
+        // 如果启用了AI处理，添加原始内容对比（可选）
+        if (processedContent.isProcessed && processedContent.originalText !== processedContent.processedText) {
+            content += '## 原始转录\n\n';
+            content += '> 原始语音转录内容\n\n';
+            content += processedContent.originalText;
+            content += '\n\n';
+        }
 
         return content;
+    }
+
+    /**
+     * 生成笔记内容（向后兼容版本）
+     */
+    generateNoteContent(
+        aiResponse: string, 
+        metadata: NoteMetadata,
+        includeMetadata: boolean = true
+    ): string {
+        // 转换为新格式
+        const processedContent: ProcessedContent = {
+            originalText: aiResponse,
+            processedText: aiResponse,
+            tags: [],
+            isProcessed: false
+        };
+
+        return this.generateNoteContentWithAI(processedContent, metadata, includeMetadata);
     }
 
     /**
@@ -149,6 +200,25 @@ export class NoteGenerator {
         }
         
         return testPath;
+    }
+
+    /**
+     * 格式化标签为Obsidian格式
+     */
+    formatTagsForObsidian(tags: string[]): string {
+        if (!tags || tags.length === 0) return '#语音笔记';
+        
+        const formattedTags = tags
+            .filter(tag => tag.trim().length > 0)
+            .map(tag => `#${tag.trim().replace(/\s+/g, '_')}`) // 替换空格为下划线
+            .join(' ');
+        
+        // 确保至少有一个语音笔记标签
+        if (!formattedTags.includes('#语音笔记')) {
+            return `${formattedTags} #语音笔记`;
+        }
+        
+        return formattedTags;
     }
 
     /**

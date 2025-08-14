@@ -37,9 +37,45 @@ export interface DashScopeResponse {
     request_id: string;
 }
 
+// 兼容模式文本API的消息接口
+export interface CompatibleMessage {
+    role: 'user' | 'assistant' | 'system';
+    content: string;
+}
+
+// 兼容模式API请求接口
+export interface CompatibleRequest {
+    model: string;
+    messages: CompatibleMessage[];
+}
+
+// 兼容模式API响应接口
+export interface CompatibleResponse {
+    choices: Array<{
+        finish_reason: string;
+        message: {
+            role: string;
+            content: string;
+        };
+    }>;
+    usage: {
+        prompt_tokens: number;
+        completion_tokens: number;
+        total_tokens: number;
+    };
+    id: string;
+}
+
+// 文本处理结果接口
+export interface TextProcessingResult {
+    processedText: string;
+    tags: string[];
+}
+
 export class DashScopeClient {
     private readonly apiKey: string;
     private readonly baseUrl = 'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation';
+    private readonly compatibleUrl = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
 
     constructor(apiKey: string) {
         this.apiKey = apiKey;
@@ -265,5 +301,154 @@ export class DashScopeClient {
         };
 
         return prompts[scenario] || prompts.notes;
+    }
+
+    // 使用文本模型处理转录文本
+    async processTextWithLLM(transcribedText: string, model: string = 'qwen-plus-latest'): Promise<TextProcessingResult> {
+        try {
+            console.log(`使用${model}模型处理文本，长度: ${transcribedText.length}字符`);
+
+            // 分两次调用：文本整理 + 标签生成
+            const [processedText, tags] = await Promise.all([
+                this.improveText(transcribedText, model),
+                this.generateTags(transcribedText, model)
+            ]);
+
+            return {
+                processedText,
+                tags
+            };
+
+        } catch (error) {
+            console.error('LLM文本处理失败:', error);
+            throw new Error(`文本处理失败: ${error.message}`);
+        }
+    }
+
+    // 文本整理和优化
+    private async improveText(text: string, model: string): Promise<string> {
+        const request: CompatibleRequest = {
+            model,
+            messages: [
+                {
+                    role: 'system',
+                    content: '你是一个专业的文本编辑助手。请对用户提供的语音转录文本进行整理和优化，要求：1. 修正语法错误和口语化表达 2. 保持原始内容的完整性和原意 3. 优化表达方式，使其更加清晰易读 4. 保持逻辑结构和重要信息不变 5. 使用规范的标点符号 6. 输出格式为规整的中文文本'
+                },
+                {
+                    role: 'user',
+                    content: `请对以下语音转录文本进行整理和优化：\n\n${text}`
+                }
+            ]
+        };
+
+        const response = await this.callCompatibleAPI(request);
+        return response.choices[0]?.message?.content || text;
+    }
+
+    // 生成相关标签
+    private async generateTags(text: string, model: string): Promise<string[]> {
+        const request: CompatibleRequest = {
+            model,
+            messages: [
+                {
+                    role: 'system',
+                    content: '你是一个专业的内容分析助手。请分析用户提供的文本内容，生成3-5个相关的标签。要求：1. 标签应该准确反映文本的主要内容和主题 2. 使用简洁的中文词汇 3. 避免过于宽泛或过于具体的标签 4. 标签之间用逗号分隔 5. 不需要添加#符号，只输出标签文字'
+                },
+                {
+                    role: 'user',
+                    content: `请为以下文本生成相关标签：\n\n${text}`
+                }
+            ]
+        };
+
+        const response = await this.callCompatibleAPI(request);
+        const tagsText = response.choices[0]?.message?.content || '';
+        
+        // 解析标签，按逗号分割并清理
+        return tagsText.split(/[,，、]/)
+            .map(tag => tag.trim())
+            .filter(tag => tag.length > 0)
+            .slice(0, 5); // 最多5个标签
+    }
+
+    // 调用兼容模式API
+    private async callCompatibleAPI(request: CompatibleRequest): Promise<CompatibleResponse> {
+        console.log('调用兼容模式API:', this.compatibleUrl);
+        console.log('请求参数:', JSON.stringify(request, null, 2));
+
+        const response = await requestUrl({
+            url: this.compatibleUrl,
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${this.apiKey}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(request),
+            throw: false
+        });
+
+        console.log('兼容模式API响应状态:', response.status);
+
+        if (response.status >= 400) {
+            console.error('兼容模式API错误:', response.text);
+            throw new Error(`兼容模式API请求失败 (${response.status}): ${response.text}`);
+        }
+
+        const data: CompatibleResponse = response.json;
+        console.log('兼容模式API响应数据:', JSON.stringify(data, null, 2));
+
+        if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+            throw new Error('兼容模式API返回数据格式异常');
+        }
+
+        return data;
+    }
+
+    // 测试文本LLM连接
+    async testTextLLM(model: string = 'qwen-plus-latest'): Promise<{ success: boolean; error?: string }> {
+        try {
+            console.log(`开始文本LLM测试，模型: ${model}`);
+
+            const testRequest: CompatibleRequest = {
+                model,
+                messages: [
+                    {
+                        role: 'system',
+                        content: '你是一个有用的助手。'
+                    },
+                    {
+                        role: 'user',
+                        content: '请简单介绍一下你自己'
+                    }
+                ]
+            };
+
+            const response = await this.callCompatibleAPI(testRequest);
+            
+            if (response.choices?.[0]?.message?.content) {
+                console.log('文本LLM测试成功，响应:', response.choices[0].message.content);
+                return { success: true };
+            } else {
+                return { 
+                    success: false, 
+                    error: '响应格式异常' 
+                };
+            }
+
+        } catch (error) {
+            console.error('文本LLM测试失败:', error);
+            
+            let errorMessage = '未知错误';
+            if (error instanceof TypeError && error.message === 'Failed to fetch') {
+                errorMessage = '网络连接失败';
+            } else if (error.message) {
+                errorMessage = error.message;
+            }
+            
+            return { 
+                success: false, 
+                error: errorMessage 
+            };
+        }
     }
 }
