@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is an Obsidian plugin project named "getnote-plugin" that converts voice input into transcribed text using AI. The plugin uses Alibaba Cloud's DashScope API with the qwen-audio-asr-latest model for accurate audio-to-text transcription.
 
-### Current Status (Phase 3 Complete ✅)
+### Current Status (Phase 4 Complete - UI Simplified ✅)
 - ✅ Basic plugin structure implemented
 - ✅ Audio recording functionality using Web Audio API
 - ✅ DashScope API integration with proper authentication
@@ -19,11 +19,11 @@ This is an Obsidian plugin project named "getnote-plugin" that converts voice in
 - ✅ Complete recording UI with start/pause/stop controls
 - ✅ Modern, beautiful interface design with animations
 - ✅ Real-time recording status and time display
-- ✅ **NEW**: State machine-driven UI with single primary button design
-- ✅ **NEW**: CSS design token system for consistent theming
-- ✅ **NEW**: Information band with level meter and progress indicators
-- ✅ **NEW**: Stop recording confirmation dialog
-- ✅ **NEW**: Enhanced error state handling and retry functionality
+- ✅ **FINAL**: Simplified three-button UI design (极简三按钮界面)
+- ✅ **FINAL**: Semantic color scheme with intuitive button meanings
+- ✅ **FINAL**: Streamlined state management (idle/recording/paused)
+- ✅ **FINAL**: Enhanced user experience with minimal cognitive load
+- ✅ **FINAL**: Responsive design optimized for all devices
 
 ### Key Features
 - 🎙️ **Voice Recording**: Uses MediaRecorder API with configurable quality settings
@@ -32,10 +32,11 @@ This is an Obsidian plugin project named "getnote-plugin" that converts voice in
 - ⚙️ **Settings UI**: API key management, model selection, output configuration
 - 📁 **Organization**: Automatic saving to configurable vault folders
 - 🎯 **Simple Format**: Clean text transcription with metadata
-- 🎨 **Modern UI**: Beautiful recording modal with start/pause/stop controls
-- ⏱️ **Real-time Display**: Live recording time and status indicators
-- 🎭 **Animations**: Smooth status transitions and visual feedback
+- 🎨 **Simplified UI**: Three-button interface (Start/Pause/Stop) with intuitive design
+- ⏱️ **Clear Status**: Simple dot indicator + text for current recording state
+- 🌈 **Semantic Colors**: Green=Start, Orange=Pause, Red=Stop for immediate recognition
 - 📱 **Responsive Design**: Optimized for both desktop and mobile devices
+- ♿ **Accessibility**: Full keyboard navigation and high contrast support
 
 ## Technical Requirements
 
@@ -207,27 +208,27 @@ Common plugin features:
 
 ## UI Design Features
 
-### Recording Modal Interface (Phase 3 - State Machine Design)
-- **Modern Design**: Gradient backgrounds, rounded corners, and glass-morphism effects based on CSS design tokens
-- **Status Bar**: Unified status indicator with contextual text (replaced胶囊状态显示)
-  - 🔘 Gray: Idle state
-  - 🔴 Red pulsing: Recording active  
-  - 🟡 Orange blinking: Paused state
-  - 🔵 Blue spinning: Processing
-  - 🔴 Red: Error state
-- **Single Primary Button Design**: Main action button changes based on state (start/pause/resume/retry)
-- **Secondary Button**: Context-aware secondary actions (import/stop/cancel)
-- **Information Band**: Real-time level meter and progress indication during recording
-- **Time Display**: Large, monospace font with optional colon blinking and dimming effects
-- **Confirmation Dialog**: Stop recording requires user confirmation to prevent accidental data loss
-- **State Machine Logic**: Five distinct states (idle/recording/paused/processing/error) drive all UI behavior
-- **Responsive Layout**: Adapts to mobile and desktop screens with optimized touch targets
+### Recording Modal Interface (Phase 4 - Simplified Design)
+- **Clean Card Design**: Simple background with subtle shadows and rounded corners
+- **Status Indicator**: Small dot + descriptive text for current state
+  - 🔘 Gray: Idle state (准备录音)
+  - 🔴 Red pulsing: Recording active (正在录音...)  
+  - 🟡 Orange blinking: Paused state (录音已暂停)
+- **Three Independent Buttons**: Fixed positions and clear functions
+  - 🟢 **Start Button**: Green, "🎤 开始录音" / "▶️ 继续录音"
+  - 🟠 **Pause Button**: Orange, "⏸️ 暂停"
+  - 🔴 **Stop Button**: Red, "⏹️ 停止"
+- **Time Display**: Large, monospace font with colon blinking during recording
+- **Simple State Logic**: Only 3 states (idle/recording/paused) for maximum clarity
+- **Contextual Hints**: Dynamic help text that changes based on current state
+- **Responsive Layout**: Horizontal buttons on desktop, vertical stack on mobile
+- **Button Feedback**: Hover effects, disabled states, and press animations
 
 ### Animation System
-- **Pulse Effects**: Status indicators have contextual animations
-- **Hover States**: Buttons lift and glow on interaction
-- **Smooth Transitions**: All state changes are animated
-- **Accessibility**: Respects `prefers-reduced-motion` setting
+- **Status Animations**: Dot pulsing for recording, blinking for paused state
+- **Button Interactions**: Subtle lift on hover, press feedback on click
+- **Time Display**: Colon blinking during active recording
+- **Accessibility**: Respects `prefers-reduced-motion` setting for reduced animations
 
 ### Theme Support
 - **Dark/Light Modes**: Automatically adapts to Obsidian themes
@@ -258,7 +259,21 @@ Common plugin features:
 - [x] Mobile device compatibility
 - [x] Error handling edge cases
 
-### Phase 3 Testing (Future Enhancement)
+### Phase 3 Testing (Completed ✅)
+- [x] Complex state machine UI implementation
+- [x] Advanced animation and transition effects
+- [x] Information band and level meter functionality
+- [x] Stop confirmation dialog system
+- [x] CSS design token architecture
+
+### Phase 4 Testing (Completed ✅) - UI Simplification
+- [x] Three-button interface usability testing
+- [x] Simplified state management verification
+- [x] Semantic color scheme effectiveness
+- [x] Mobile responsiveness optimization
+- [x] Accessibility compliance validation
+
+### Future Enhancement Ideas
 - [ ] Advanced note templates
 - [ ] Batch audio processing
 - [ ] Export/import settings functionality
@@ -284,10 +299,34 @@ Common plugin features:
 
 ## Development Notes for Claude Code
 
-When continuing development:
-1. Always test API connections first before implementing new features
-2. Use the existing modular architecture for new components
-3. Follow the established error handling patterns
-4. Update this CLAUDE.md file with any significant changes
-5. Run `npm run build` after code changes to test compilation
-6. Use git commits with descriptive messages for version tracking
+### UI Design Philosophy (Phase 4)
+The plugin has evolved through multiple UI iterations and settled on a **simplified three-button approach** for optimal user experience:
+
+1. **Complexity Lessons Learned**: 
+   - Complex state machines (5+ states) created cognitive overhead
+   - Single primary button design confused users with changing labels
+   - Information bands and confirmation dialogs were over-engineered
+   - CSS design token systems added unnecessary abstraction
+
+2. **Current Simple Approach**:
+   - Three independent, fixed-function buttons (Start/Pause/Stop)
+   - Semantic color coding (Green/Orange/Red) for intuitive recognition
+   - Simple 3-state management (idle/recording/paused) only
+   - Clean visual hierarchy with minimal distractions
+
+### Development Guidelines
+1. **Maintain Simplicity**: Resist feature creep that complicates the core recording experience
+2. **Test API First**: Always verify DashScope connectivity before UI changes
+3. **Preserve Modularity**: Keep recorder, API client, and note generator as separate concerns
+4. **Update Documentation**: Keep this CLAUDE.md current with any architectural changes
+5. **Build & Test**: Run `npm run build` after changes to verify compilation
+6. **Git Hygiene**: Use descriptive commit messages documenting both what and why
+
+### Architecture Stability
+The current architecture represents a mature, user-tested design. Future enhancements should focus on:
+- Performance optimizations
+- Additional audio format support  
+- Note template customization
+- Bulk processing capabilities
+
+Avoid major UI restructuring unless based on clear user feedback indicating usability issues.
