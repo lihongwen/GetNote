@@ -519,6 +519,17 @@ var NoteGenerator = class {
     } else {
       content += "#\u8BED\u97F3\u7B14\u8BB0\n\n";
     }
+    if (metadata.audioFilePath) {
+      content += `## \u{1F3A7} \u539F\u97F3\u9891
+
+`;
+      content += `![[${metadata.audioFilePath}]]
+
+`;
+      content += `> \u{1F4BE} \u97F3\u9891\u6587\u4EF6: ${metadata.audioFileName || "\u672A\u77E5"}
+
+`;
+    }
     if (includeMetadata) {
       content += `\u521B\u5EFA\u65F6\u95F4: ${timestamp.toLocaleString()}`;
       if (duration) {
@@ -737,6 +748,52 @@ var NoteGenerator = class {
     };
     return templates[templateType];
   }
+  /**
+   * 保存音频文件到vault
+   */
+  async saveAudioFile(audioBlob, folderPath, fileName) {
+    const audioFolderPath = `${folderPath}/audio`;
+    await this.ensureFolderExists(audioFolderPath);
+    const audioFormat = this.detectAudioFormat(audioBlob);
+    const audioFileName = fileName.replace(".md", audioFormat);
+    const fullAudioPath = `${audioFolderPath}/${audioFileName}`;
+    const finalAudioPath = await this.getUniqueFilePath(fullAudioPath);
+    const arrayBuffer = await audioBlob.arrayBuffer();
+    const audioFile = await this.app.vault.createBinary(finalAudioPath, arrayBuffer);
+    const relativePath = finalAudioPath.replace(`${folderPath}/`, "");
+    return { audioFile, audioFilePath: relativePath };
+  }
+  /**
+   * 检测音频格式并返回对应的文件扩展名
+   */
+  detectAudioFormat(audioBlob) {
+    const mimeType = audioBlob.type.toLowerCase();
+    if (mimeType.includes("webm")) {
+      return ".webm";
+    } else if (mimeType.includes("wav")) {
+      return ".wav";
+    } else if (mimeType.includes("mp3") || mimeType.includes("mpeg")) {
+      return ".mp3";
+    } else if (mimeType.includes("ogg")) {
+      return ".ogg";
+    } else if (mimeType.includes("mp4") || mimeType.includes("m4a")) {
+      return ".m4a";
+    } else {
+      return ".webm";
+    }
+  }
+  /**
+   * 生成音频文件名（基于笔记文件名）
+   */
+  generateAudioFileName(noteFileName) {
+    return noteFileName.replace(".md", ".webm");
+  }
+  /**
+   * 检查是否支持保存二进制文件
+   */
+  static isAudioSaveSupported() {
+    return typeof ArrayBuffer !== "undefined";
+  }
 };
 
 // src/settings.ts
@@ -918,7 +975,9 @@ var DEFAULT_SETTINGS = {
   textModel: "qwen-plus-latest",
   processOriginalText: true,
   generateTags: true,
-  maxRetries: 2
+  maxRetries: 2,
+  // 音频保留默认设置
+  keepOriginalAudio: false
 };
 var GetNoteSettingTab = class extends import_obsidian2.PluginSettingTab {
   constructor(app, plugin) {
@@ -999,6 +1058,10 @@ var GetNoteSettingTab = class extends import_obsidian2.PluginSettingTab {
     new import_obsidian2.Setting(containerEl).setName("\u6700\u5927\u5F55\u97F3\u65F6\u957F").setDesc("\u5355\u6B21\u5F55\u97F3\u7684\u6700\u5927\u65F6\u957F\u9650\u5236\uFF08\u79D2\uFF09").addText((text) => text.setPlaceholder("300").setValue(this.plugin.settings.maxRecordingDuration.toString()).onChange(async (value) => {
       const duration = parseInt(value) || 300;
       this.plugin.settings.maxRecordingDuration = Math.max(30, Math.min(1800, duration));
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian2.Setting(containerEl).setName("\u4FDD\u7559\u539F\u97F3\u9891\u6587\u4EF6").setDesc("\u5728\u751F\u6210\u6587\u5B57\u7B14\u8BB0\u7684\u540C\u65F6\u4FDD\u5B58\u539F\u97F3\u9891\u6587\u4EF6\uFF0C\u53EF\u968F\u65F6\u56DE\u542C\u5F55\u97F3\u5185\u5BB9\uFF08\u4F1A\u5360\u7528\u66F4\u591A\u5B58\u50A8\u7A7A\u95F4\uFF09").addToggle((toggle) => toggle.setValue(this.plugin.settings.keepOriginalAudio).onChange(async (value) => {
+      this.plugin.settings.keepOriginalAudio = value;
       await this.plugin.saveSettings();
     }));
   }
@@ -1223,7 +1286,7 @@ var RecordingModal = class extends import_obsidian3.Modal {
     if (this.state === "idle") {
       return false;
     }
-    return this.state === "recording" || this.state === "paused" || this.state === "transcribing" || this.state === "processing" || this.state === "saving";
+    return this.state === "recording" || this.state === "paused" || this.state === "saving-audio" || this.state === "transcribing" || this.state === "processing" || this.state === "saving";
   }
   /**
    * 显示关闭确认对话框
@@ -1243,6 +1306,8 @@ var RecordingModal = class extends import_obsidian3.Modal {
       case "recording":
       case "paused":
         return "\u786E\u5B9A\u8981\u53D6\u6D88\u5F55\u97F3\u5417\uFF1F\n\n\u5F55\u97F3\u5185\u5BB9\u5C06\u4F1A\u4E22\u5931\uFF0C\u65E0\u6CD5\u6062\u590D\u3002";
+      case "saving-audio":
+        return "\u6B63\u5728\u4FDD\u5B58\u97F3\u9891\u6587\u4EF6\uFF0C\u786E\u5B9A\u8981\u53D6\u6D88\u5417\uFF1F\n\n\u5F55\u97F3\u548C\u97F3\u9891\u6587\u4EF6\u5C06\u4F1A\u4E22\u5931\u3002";
       case "transcribing":
         return "\u6B63\u5728\u8F6C\u5F55\u97F3\u9891\uFF0C\u786E\u5B9A\u8981\u53D6\u6D88\u5417\uFF1F\n\n\u5DF2\u5F55\u5236\u7684\u5185\u5BB9\u5C06\u4F1A\u4E22\u5931\u3002";
       case "processing":
@@ -1334,7 +1399,6 @@ var RecordingModal = class extends import_obsidian3.Modal {
         clearInterval(this.timerInterval);
         this.timerInterval = null;
       }
-      this.setState("transcribing");
       await this.onRecordingComplete(audioBlob);
       this.close();
     } catch (error) {
@@ -1382,6 +1446,16 @@ var RecordingModal = class extends import_obsidian3.Modal {
         this.pauseButton.setDisabled(true);
         this.stopButton.setDisabled(false);
         this.cancelButton.setDisabled(false);
+        break;
+      case "saving-audio":
+        this.statusContainer.addClass("status-recording");
+        this.statusText.textContent = "\u{1F4BE} \u4FDD\u5B58\u97F3\u9891...";
+        this.timeDisplay.removeClass("recording");
+        this.hintText.textContent = "\u6B63\u5728\u4FDD\u5B58\u97F3\u9891\u6587\u4EF6\uFF0C\u8BF7\u7A0D\u5019...";
+        this.startButton.setDisabled(true);
+        this.pauseButton.setDisabled(true);
+        this.stopButton.setDisabled(true);
+        this.cancelButton.setDisabled(false).setButtonText("\u274C \u53D6\u6D88");
         break;
       case "transcribing":
         this.statusContainer.addClass("status-recording");
@@ -1520,6 +1594,37 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
         new import_obsidian4.Notice(sizeCheck.message || "\u97F3\u9891\u6587\u4EF6\u8FC7\u5927");
         return;
       }
+      let audioMetadata = {};
+      if (this.settings.keepOriginalAudio) {
+        try {
+          if (this.recordingModal) {
+            this.recordingModal.updateProcessingState("saving-audio");
+          }
+          new import_obsidian4.Notice("\u6B63\u5728\u4FDD\u5B58\u97F3\u9891\u6587\u4EF6...");
+          console.log("\u5F00\u59CB\u4FDD\u5B58\u97F3\u9891\u6587\u4EF6");
+          const tempFileName = this.noteGenerator.generateFileName("\u8BED\u97F3\u8F6C\u5F55", new Date());
+          const audioResult = await this.noteGenerator.saveAudioFile(
+            audioBlob,
+            this.settings.outputFolder,
+            tempFileName
+          );
+          audioMetadata = {
+            audioFileName: audioResult.audioFile.name,
+            audioFilePath: audioResult.audioFilePath
+          };
+          console.log("\u97F3\u9891\u6587\u4EF6\u4FDD\u5B58\u5B8C\u6210:", audioResult.audioFilePath);
+        } catch (audioSaveError) {
+          console.error("\u4FDD\u5B58\u97F3\u9891\u6587\u4EF6\u5931\u8D25:", audioSaveError);
+          new import_obsidian4.Notice("\u4FDD\u5B58\u97F3\u9891\u6587\u4EF6\u5931\u8D25\uFF0C\u4F46\u4F1A\u7EE7\u7EED\u8FDB\u884C\u6587\u5B57\u8F6C\u5F55");
+        }
+        if (this.isProcessingCancelled) {
+          console.log("\u97F3\u9891\u4FDD\u5B58\u540E\u88AB\u7528\u6237\u53D6\u6D88");
+          return;
+        }
+      }
+      if (this.recordingModal) {
+        this.recordingModal.updateProcessingState("transcribing");
+      }
       new import_obsidian4.Notice("\u6B63\u5728\u8C03\u7528AI\u8F6C\u5F55\u97F3\u9891...");
       console.log("\u5F00\u59CB\u8BED\u97F3\u8F6C\u5F55\u5904\u7406");
       const transcribedText = await this.dashScopeClient.processAudio(audioBlob);
@@ -1568,7 +1673,10 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
         processingTime: this.noteGenerator.formatDuration(processingDuration),
         model: this.settings.modelName,
         textModel: this.settings.enableLLMProcessing ? this.settings.textModel : void 0,
-        isProcessed: processedContent.isProcessed
+        isProcessed: processedContent.isProcessed,
+        // 添加音频文件信息
+        audioFileName: audioMetadata.audioFileName,
+        audioFilePath: audioMetadata.audioFilePath
       };
       const noteContent = this.noteGenerator.generateNoteContentWithAI(
         processedContent,
@@ -1582,10 +1690,11 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
           this.settings.outputFolder,
           fileName
         );
+        const audioSavedMessage = this.settings.keepOriginalAudio && audioMetadata.audioFileName ? "\uFF0C\u539F\u97F3\u9891\u5DF2\u4FDD\u5B58" : "";
         if (processedContent.isProcessed) {
-          new import_obsidian4.Notice(`AI\u5904\u7406\u5B8C\u6210\uFF01\u7B14\u8BB0\u5DF2\u4FDD\u5B58: ${savedFile.name}\uFF0C\u5305\u542B${processedContent.tags.length}\u4E2A\u6807\u7B7E`);
+          new import_obsidian4.Notice(`AI\u5904\u7406\u5B8C\u6210\uFF01\u7B14\u8BB0\u5DF2\u4FDD\u5B58: ${savedFile.name}\uFF0C\u5305\u542B${processedContent.tags.length}\u4E2A\u6807\u7B7E${audioSavedMessage}`);
         } else {
-          new import_obsidian4.Notice(`\u8F6C\u5F55\u5B8C\u6210\uFF0C\u7B14\u8BB0\u5DF2\u4FDD\u5B58: ${savedFile.name}`);
+          new import_obsidian4.Notice(`\u8F6C\u5F55\u5B8C\u6210\uFF0C\u7B14\u8BB0\u5DF2\u4FDD\u5B58: ${savedFile.name}${audioSavedMessage}`);
         }
         console.log("\u7B14\u8BB0\u4FDD\u5B58\u5B8C\u6210:", savedFile.path);
       } else {
