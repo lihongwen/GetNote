@@ -176,8 +176,8 @@ export default class GetNotePlugin extends Plugin {
 			
 			console.log('语音转录完成，文本长度:', transcribedText.length);
 
-			// 阶段2：AI文本处理（如果启用）
-			let processedContent: ProcessedContent;
+			// 阶段2：AI增强文本处理（如果启用）
+			let enhancedContent: import('./src/text-processor').EnhancedProcessingResult;
 			
 			if (this.settings.enableLLMProcessing && this.textProcessor) {
 				// 更新界面状态
@@ -185,10 +185,10 @@ export default class GetNotePlugin extends Plugin {
 					this.recordingModal.updateProcessingState('processing');
 				}
 				
-				new Notice('正在使用AI优化文本...');
-				console.log('开始AI文本处理');
+				new Notice('正在使用AI增强处理文本...');
+				console.log('开始AI增强文本处理');
 				
-				processedContent = await this.textProcessor.processTranscribedText(transcribedText);
+				enhancedContent = await this.textProcessor.processTranscribedTextEnhanced(transcribedText);
 				
 				// 检查是否被取消
 				if (this.isProcessingCancelled) {
@@ -196,13 +196,16 @@ export default class GetNotePlugin extends Plugin {
 					return;
 				}
 				
-				console.log('AI文本处理完成，是否已处理:', processedContent.isProcessed);
+				console.log('AI增强处理完成，是否已处理:', enhancedContent.isProcessed);
 			} else {
 				// 不启用AI处理，直接使用原始文本
-				processedContent = {
+				enhancedContent = {
 					originalText: transcribedText,
 					processedText: transcribedText,
 					tags: [],
+					structuredTags: { people: [], events: [], topics: [], times: [], locations: [] },
+					summary: transcribedText,
+					smartTitle: transcribedText.substring(0, 20) + '...',
 					isProcessed: false
 				};
 			}
@@ -223,26 +226,23 @@ export default class GetNotePlugin extends Plugin {
 
 			// 创建笔记元数据
 			const metadata: NoteMetadata = {
-				title: this.noteGenerator.extractTitleFromContent(
-					processedContent.isProcessed ? processedContent.processedText : processedContent.originalText
-				),
+				title: enhancedContent.smartTitle,
 				timestamp: new Date(),
 				duration: '音频转录', // 由于使用Modal，录音时长在Modal中管理
 				audioSize: this.noteGenerator.formatFileSize(audioBlob.size),
 				processingTime: this.noteGenerator.formatDuration(processingDuration),
 				model: this.settings.modelName,
 				textModel: this.settings.enableLLMProcessing ? this.settings.textModel : undefined,
-				isProcessed: processedContent.isProcessed,
+				isProcessed: enhancedContent.isProcessed,
 				// 添加音频文件信息
 				audioFileName: audioMetadata.audioFileName,
 				audioFilePath: audioMetadata.audioFilePath
 			};
 
-			// 生成笔记内容（使用新的AI增强方法）
-			const noteContent = this.noteGenerator.generateNoteContentWithAI(
-				processedContent,
-				metadata,
-				this.settings.includeMetadata
+			// 生成笔记内容（使用新的增强方法）
+			const noteContent = this.noteGenerator.generateEnhancedNoteContent(
+				enhancedContent,
+				metadata
 			);
 
 			// 保存笔记
@@ -259,8 +259,11 @@ export default class GetNotePlugin extends Plugin {
 					? '，原音频已保存' 
 					: '';
 					
-				if (processedContent.isProcessed) {
-					new Notice(`AI处理完成！笔记已保存: ${savedFile.name}，包含${processedContent.tags.length}个标签${audioSavedMessage}`);
+				if (enhancedContent.isProcessed) {
+					const structuredTagsCount = Object.values(enhancedContent.structuredTags)
+						.reduce((count, tagArray) => count + tagArray.length, 0);
+					const totalTags = enhancedContent.tags.length + structuredTagsCount;
+					new Notice(`AI增强处理完成！笔记已保存: ${savedFile.name}，包含${totalTags}个结构化标签${audioSavedMessage}`);
 				} else {
 					new Notice(`转录完成，笔记已保存: ${savedFile.name}${audioSavedMessage}`);
 				}
@@ -268,8 +271,8 @@ export default class GetNotePlugin extends Plugin {
 				console.log('笔记保存完成:', savedFile.path);
 			} else {
 				// 如果不自动保存，可以显示预览或提示用户手动保存
-				const message = processedContent.isProcessed 
-					? 'AI文本处理完成，请手动保存笔记'
+				const message = enhancedContent.isProcessed 
+					? 'AI增强处理完成，请手动保存笔记'
 					: '音频转录完成，请手动保存笔记';
 				new Notice(message);
 			}

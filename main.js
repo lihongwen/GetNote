@@ -506,6 +506,107 @@ var NoteGenerator = class {
     this.app = app;
   }
   /**
+   * 生成增强的笔记内容（支持YAML front matter和结构化内容）
+   */
+  generateEnhancedNoteContent(enhancedResult, metadata) {
+    let content = "";
+    content += this.generateYAMLFrontMatter(enhancedResult, metadata);
+    const smartTitle = this.formatSmartTitle(enhancedResult.smartTitle, metadata.timestamp);
+    content += `# ${smartTitle}
+
+`;
+    if (metadata.audioFilePath) {
+      content += `## \u{1F3A7} \u539F\u97F3\u9891
+
+`;
+      content += `![[${metadata.audioFilePath}]]
+
+`;
+    }
+    content += `## \u{1F4DD} \u8F6C\u5F55\u6587\u5B57
+
+`;
+    content += enhancedResult.originalText + "\n\n";
+    content += `## \u{1F4CB} \u7B14\u8BB0\u6982\u8981
+
+`;
+    content += enhancedResult.summary + "\n\n";
+    return content;
+  }
+  /**
+   * 生成YAML front matter
+   */
+  generateYAMLFrontMatter(enhancedResult, metadata) {
+    const yaml = [];
+    yaml.push("---");
+    yaml.push(`created: ${metadata.timestamp.toISOString()}`);
+    yaml.push(`title: "${this.formatSmartTitle(enhancedResult.smartTitle, metadata.timestamp)}"`);
+    if (metadata.duration) {
+      yaml.push(`duration: "${metadata.duration}"`);
+    }
+    const allTags = this.combineStructuredTags(enhancedResult.structuredTags);
+    if (allTags.length > 0) {
+      yaml.push("tags:");
+      allTags.forEach((tag) => {
+        yaml.push(`  - "${tag}"`);
+      });
+    }
+    yaml.push(`processed: ${enhancedResult.isProcessed}`);
+    yaml.push(`model: "${metadata.model}"`);
+    if (metadata.textModel && enhancedResult.isProcessed) {
+      yaml.push(`text_model: "${metadata.textModel}"`);
+    }
+    if (metadata.audioFileName) {
+      yaml.push(`audio_file: "${metadata.audioFilePath}"`);
+    }
+    if (enhancedResult.summary && enhancedResult.summary !== enhancedResult.originalText) {
+      const escapedSummary = enhancedResult.summary.replace(/"/g, '\\"');
+      yaml.push(`summary: "${escapedSummary}"`);
+    }
+    yaml.push("---");
+    yaml.push("");
+    return yaml.join("\n");
+  }
+  /**
+   * 合并结构化标签为扁平数组
+   */
+  combineStructuredTags(structuredTags) {
+    const tags = [];
+    structuredTags.people.forEach((person) => {
+      tags.push(`\u4EBA\u7269/${person}`);
+    });
+    structuredTags.events.forEach((event) => {
+      tags.push(`\u4E8B\u4EF6/${event}`);
+    });
+    structuredTags.topics.forEach((topic) => {
+      tags.push(`\u4E3B\u9898/${topic}`);
+    });
+    structuredTags.times.forEach((time) => {
+      tags.push(`\u65F6\u95F4/${time}`);
+    });
+    structuredTags.locations.forEach((location) => {
+      tags.push(`\u5730\u70B9/${location}`);
+    });
+    tags.push("\u8BED\u97F3\u7B14\u8BB0");
+    return tags;
+  }
+  /**
+   * 格式化智能标题
+   */
+  formatSmartTitle(smartTitle, timestamp) {
+    const dateStr = timestamp.toLocaleDateString("zh-CN", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).replace(/\//g, "-");
+    const timeStr = timestamp.toLocaleTimeString("zh-CN", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false
+    });
+    return `${dateStr} ${timeStr} - ${smartTitle}`;
+  }
+  /**
    * 生成笔记内容（新版本，支持AI处理结果）
    */
   generateNoteContentWithAI(processedContent, metadata, includeMetadata = true) {
@@ -806,7 +907,68 @@ var TextProcessor = class {
     this.settings = settings;
   }
   /**
-   * 处理转录文本 - 主要入口点
+   * 增强的文本处理 - 新的主要入口点
+   * @param transcribedText 原始转录文本
+   * @returns 包含所有增强信息的处理结果
+   */
+  async processTranscribedTextEnhanced(transcribedText) {
+    if (!this.settings.enableLLMProcessing) {
+      return {
+        originalText: transcribedText,
+        processedText: transcribedText,
+        tags: [],
+        structuredTags: { people: [], events: [], topics: [], times: [], locations: [] },
+        summary: transcribedText,
+        smartTitle: this.generateBasicTitle(transcribedText),
+        isProcessed: false
+      };
+    }
+    try {
+      console.log("\u5F00\u59CB\u589E\u5F3ALLM\u6587\u672C\u5904\u7406...");
+      const [basicResult, structuredTags, summary, title] = await Promise.all([
+        this.processWithRetry(transcribedText),
+        this.generateStructuredTags(transcribedText),
+        this.generateContentSummary(transcribedText),
+        this.generateSmartTitle(transcribedText)
+      ]);
+      return {
+        originalText: transcribedText,
+        processedText: basicResult.processedText,
+        tags: basicResult.tags,
+        structuredTags,
+        summary,
+        smartTitle: title,
+        isProcessed: true
+      };
+    } catch (error) {
+      console.error("\u589E\u5F3ALLM\u5904\u7406\u5931\u8D25\uFF0C\u4F7F\u7528\u57FA\u7840\u5904\u7406:", error);
+      try {
+        const basicResult = await this.processWithRetry(transcribedText);
+        return {
+          originalText: transcribedText,
+          processedText: basicResult.processedText,
+          tags: basicResult.tags,
+          structuredTags: { people: [], events: [], topics: [], times: [], locations: [] },
+          summary: transcribedText.substring(0, 200) + "...",
+          smartTitle: this.generateBasicTitle(transcribedText),
+          isProcessed: true
+        };
+      } catch (basicError) {
+        console.error("\u57FA\u7840LLM\u5904\u7406\u4E5F\u5931\u8D25\uFF0C\u8FD4\u56DE\u539F\u59CB\u6587\u672C:", basicError);
+        return {
+          originalText: transcribedText,
+          processedText: transcribedText,
+          tags: [],
+          structuredTags: { people: [], events: [], topics: [], times: [], locations: [] },
+          summary: transcribedText,
+          smartTitle: this.generateBasicTitle(transcribedText),
+          isProcessed: false
+        };
+      }
+    }
+  }
+  /**
+   * 处理转录文本 - 向后兼容的入口点
    * @param transcribedText 原始转录文本
    * @returns 处理结果包含优化后的文本和标签
    */
@@ -923,6 +1085,108 @@ var TextProcessor = class {
         description: "\u6700\u9AD8\u8D28\u91CF\u6587\u672C\u5904\u7406\uFF0C\u6210\u672C\u8F83\u9AD8"
       }
     ];
+  }
+  /**
+   * 生成结构化标签
+   */
+  async generateStructuredTags(text) {
+    const prompt = `\u8BF7\u5206\u6790\u4EE5\u4E0B\u6587\u672C\u5185\u5BB9\uFF0C\u63D0\u53D6\u7ED3\u6784\u5316\u6807\u7B7E\u4FE1\u606F\u3002\u8BF7\u76F4\u63A5\u8FD4\u56DEJSON\u683C\u5F0F\uFF0C\u4E0D\u8981\u5305\u542B\u4EFB\u4F55\u5176\u4ED6\u6587\u5B57\uFF1A
+
+\u6587\u672C\u5185\u5BB9\uFF1A
+${text}
+
+\u8981\u6C42\uFF1A
+1. \u63D0\u53D6\u4EBA\u7269\uFF08people\uFF09\uFF1A\u6587\u672C\u4E2D\u63D0\u5230\u7684\u5177\u4F53\u4EBA\u540D
+2. \u63D0\u53D6\u4E8B\u4EF6\uFF08events\uFF09\uFF1A\u4F1A\u8BAE\u3001\u8BA8\u8BBA\u3001\u51B3\u5B9A\u3001\u4EFB\u52A1\u7B49\u4E8B\u4EF6\u7C7B\u578B
+3. \u63D0\u53D6\u4E3B\u9898\uFF08topics\uFF09\uFF1A\u5DE5\u4F5C\u3001\u6280\u672F\u3001\u751F\u6D3B\u3001\u5B66\u4E60\u7B49\u4E3B\u9898\u5206\u7C7B
+4. \u63D0\u53D6\u65F6\u95F4\uFF08times\uFF09\uFF1A\u5468\u4E00\u3001\u4E0A\u5348\u3001\u4E0B\u5468\u7B49\u65F6\u95F4\u76F8\u5173\u4FE1\u606F
+5. \u63D0\u53D6\u5730\u70B9\uFF08locations\uFF09\uFF1A\u529E\u516C\u5BA4\u3001\u5BB6\u91CC\u3001\u4F1A\u8BAE\u5BA4\u7B49\u5730\u70B9\u4FE1\u606F
+
+\u8FD4\u56DE\u683C\u5F0F\uFF1A
+{
+  "people": ["\u5F20\u4E09", "\u674E\u56DB"],
+  "events": ["\u4F1A\u8BAE", "\u8BA8\u8BBA"],
+  "topics": ["\u5DE5\u4F5C", "\u6280\u672F"],
+  "times": ["\u5468\u4E00", "\u4E0A\u5348"],
+  "locations": ["\u529E\u516C\u5BA4", "\u4F1A\u8BAE\u5BA4"]
+}`;
+    try {
+      const response = await this.client.processTextWithLLM(prompt, this.settings.textModel);
+      try {
+        const parsed = JSON.parse(response.processedText);
+        return {
+          people: Array.isArray(parsed.people) ? parsed.people : [],
+          events: Array.isArray(parsed.events) ? parsed.events : [],
+          topics: Array.isArray(parsed.topics) ? parsed.topics : [],
+          times: Array.isArray(parsed.times) ? parsed.times : [],
+          locations: Array.isArray(parsed.locations) ? parsed.locations : []
+        };
+      } catch (parseError) {
+        console.error("\u89E3\u6790\u7ED3\u6784\u5316\u6807\u7B7EJSON\u5931\u8D25:", parseError);
+        return { people: [], events: [], topics: [], times: [], locations: [] };
+      }
+    } catch (error) {
+      console.error("\u751F\u6210\u7ED3\u6784\u5316\u6807\u7B7E\u5931\u8D25:", error);
+      return { people: [], events: [], topics: [], times: [], locations: [] };
+    }
+  }
+  /**
+   * 生成内容概要
+   */
+  async generateContentSummary(text) {
+    const prompt = `\u8BF7\u5BF9\u4EE5\u4E0B\u6587\u672C\u5185\u5BB9\u8FDB\u884C\u6982\u8981\u63D0\u53D6\uFF0C\u7528\u7B80\u6D01\u7684\u8BED\u8A00\u603B\u7ED3\u4E3B\u8981\u5185\u5BB9\u3002\u8981\u6C42\uFF1A
+
+1. \u75281-3\u4E2A\u81EA\u7136\u6BB5\u843D\u6982\u62EC\u4E3B\u8981\u5185\u5BB9
+2. \u4FDD\u7559\u5173\u952E\u4FE1\u606F\u548C\u91CD\u8981\u7EC6\u8282
+3. \u8BED\u8A00\u7B80\u6D01\u660E\u4E86\uFF0C\u6613\u4E8E\u7406\u89E3
+4. \u4E0D\u8981\u6DFB\u52A0\u6807\u9898\u6216\u683C\u5F0F\u6807\u8BB0
+
+\u6587\u672C\u5185\u5BB9\uFF1A
+${text}`;
+    try {
+      const response = await this.client.processTextWithLLM(prompt, this.settings.textModel);
+      return response.processedText.trim();
+    } catch (error) {
+      console.error("\u751F\u6210\u5185\u5BB9\u6982\u8981\u5931\u8D25:", error);
+      return text.length > 200 ? text.substring(0, 200) + "..." : text;
+    }
+  }
+  /**
+   * 生成智能标题
+   */
+  async generateSmartTitle(text) {
+    const prompt = `\u8BF7\u4E3A\u4EE5\u4E0B\u6587\u672C\u5185\u5BB9\u751F\u6210\u4E00\u4E2A\u7B80\u6D01\u7684\u6807\u9898\u6982\u8981\uFF0C\u8981\u6C42\uFF1A
+
+1. \u957F\u5EA6\u63A7\u5236\u572815-30\u4E2A\u5B57\u7B26
+2. \u6982\u62EC\u6838\u5FC3\u5185\u5BB9\u548C\u5173\u952E\u4FE1\u606F
+3. \u5305\u542B\u91CD\u8981\u7684\u4EBA\u7269\u6216\u4E8B\u4EF6\uFF08\u5982\u679C\u6709\uFF09
+4. \u8BED\u8A00\u7B80\u6D01\u6709\u529B\uFF0C\u9002\u5408\u4F5C\u4E3A\u6807\u9898
+5. \u4E0D\u8981\u5305\u542B\u65F6\u95F4\u524D\u7F00\uFF0C\u53EA\u8FD4\u56DE\u5185\u5BB9\u6982\u8981
+
+\u6587\u672C\u5185\u5BB9\uFF1A
+${text}`;
+    try {
+      const response = await this.client.processTextWithLLM(prompt, this.settings.textModel);
+      const title = response.processedText.trim();
+      if (title.length > 30) {
+        return title.substring(0, 27) + "...";
+      }
+      return title || this.generateBasicTitle(text);
+    } catch (error) {
+      console.error("\u751F\u6210\u667A\u80FD\u6807\u9898\u5931\u8D25:", error);
+      return this.generateBasicTitle(text);
+    }
+  }
+  /**
+   * 生成基础标题（降级方案）
+   */
+  generateBasicTitle(text) {
+    const words = text.trim().split(/\s+/);
+    let title = words.slice(0, 8).join(" ");
+    if (title.length > 30) {
+      title = title.substring(0, 27) + "...";
+    }
+    return title || "\u8BED\u97F3\u7B14\u8BB0";
   }
   /**
    * 延迟辅助函数
@@ -1644,24 +1908,27 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
         return;
       }
       console.log("\u8BED\u97F3\u8F6C\u5F55\u5B8C\u6210\uFF0C\u6587\u672C\u957F\u5EA6:", transcribedText.length);
-      let processedContent;
+      let enhancedContent;
       if (this.settings.enableLLMProcessing && this.textProcessor) {
         if (this.recordingModal) {
           this.recordingModal.updateProcessingState("processing");
         }
-        new import_obsidian4.Notice("\u6B63\u5728\u4F7F\u7528AI\u4F18\u5316\u6587\u672C...");
-        console.log("\u5F00\u59CBAI\u6587\u672C\u5904\u7406");
-        processedContent = await this.textProcessor.processTranscribedText(transcribedText);
+        new import_obsidian4.Notice("\u6B63\u5728\u4F7F\u7528AI\u589E\u5F3A\u5904\u7406\u6587\u672C...");
+        console.log("\u5F00\u59CBAI\u589E\u5F3A\u6587\u672C\u5904\u7406");
+        enhancedContent = await this.textProcessor.processTranscribedTextEnhanced(transcribedText);
         if (this.isProcessingCancelled) {
           console.log("AI\u6587\u672C\u5904\u7406\u5DF2\u88AB\u7528\u6237\u53D6\u6D88");
           return;
         }
-        console.log("AI\u6587\u672C\u5904\u7406\u5B8C\u6210\uFF0C\u662F\u5426\u5DF2\u5904\u7406:", processedContent.isProcessed);
+        console.log("AI\u589E\u5F3A\u5904\u7406\u5B8C\u6210\uFF0C\u662F\u5426\u5DF2\u5904\u7406:", enhancedContent.isProcessed);
       } else {
-        processedContent = {
+        enhancedContent = {
           originalText: transcribedText,
           processedText: transcribedText,
           tags: [],
+          structuredTags: { people: [], events: [], topics: [], times: [], locations: [] },
+          summary: transcribedText,
+          smartTitle: transcribedText.substring(0, 20) + "...",
           isProcessed: false
         };
       }
@@ -1674,9 +1941,7 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
       }
       const processingDuration = Date.now() - processingStartTime;
       const metadata = {
-        title: this.noteGenerator.extractTitleFromContent(
-          processedContent.isProcessed ? processedContent.processedText : processedContent.originalText
-        ),
+        title: enhancedContent.smartTitle,
         timestamp: new Date(),
         duration: "\u97F3\u9891\u8F6C\u5F55",
         // 由于使用Modal，录音时长在Modal中管理
@@ -1684,15 +1949,14 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
         processingTime: this.noteGenerator.formatDuration(processingDuration),
         model: this.settings.modelName,
         textModel: this.settings.enableLLMProcessing ? this.settings.textModel : void 0,
-        isProcessed: processedContent.isProcessed,
+        isProcessed: enhancedContent.isProcessed,
         // 添加音频文件信息
         audioFileName: audioMetadata.audioFileName,
         audioFilePath: audioMetadata.audioFilePath
       };
-      const noteContent = this.noteGenerator.generateNoteContentWithAI(
-        processedContent,
-        metadata,
-        this.settings.includeMetadata
+      const noteContent = this.noteGenerator.generateEnhancedNoteContent(
+        enhancedContent,
+        metadata
       );
       if (this.settings.autoSave) {
         const fileName = this.noteGenerator.generateFileName("\u8BED\u97F3\u8F6C\u5F55", metadata.timestamp);
@@ -1702,14 +1966,16 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
           fileName
         );
         const audioSavedMessage = this.settings.keepOriginalAudio && audioMetadata.audioFileName ? "\uFF0C\u539F\u97F3\u9891\u5DF2\u4FDD\u5B58" : "";
-        if (processedContent.isProcessed) {
-          new import_obsidian4.Notice(`AI\u5904\u7406\u5B8C\u6210\uFF01\u7B14\u8BB0\u5DF2\u4FDD\u5B58: ${savedFile.name}\uFF0C\u5305\u542B${processedContent.tags.length}\u4E2A\u6807\u7B7E${audioSavedMessage}`);
+        if (enhancedContent.isProcessed) {
+          const structuredTagsCount = Object.values(enhancedContent.structuredTags).reduce((count, tagArray) => count + tagArray.length, 0);
+          const totalTags = enhancedContent.tags.length + structuredTagsCount;
+          new import_obsidian4.Notice(`AI\u589E\u5F3A\u5904\u7406\u5B8C\u6210\uFF01\u7B14\u8BB0\u5DF2\u4FDD\u5B58: ${savedFile.name}\uFF0C\u5305\u542B${totalTags}\u4E2A\u7ED3\u6784\u5316\u6807\u7B7E${audioSavedMessage}`);
         } else {
           new import_obsidian4.Notice(`\u8F6C\u5F55\u5B8C\u6210\uFF0C\u7B14\u8BB0\u5DF2\u4FDD\u5B58: ${savedFile.name}${audioSavedMessage}`);
         }
         console.log("\u7B14\u8BB0\u4FDD\u5B58\u5B8C\u6210:", savedFile.path);
       } else {
-        const message = processedContent.isProcessed ? "AI\u6587\u672C\u5904\u7406\u5B8C\u6210\uFF0C\u8BF7\u624B\u52A8\u4FDD\u5B58\u7B14\u8BB0" : "\u97F3\u9891\u8F6C\u5F55\u5B8C\u6210\uFF0C\u8BF7\u624B\u52A8\u4FDD\u5B58\u7B14\u8BB0";
+        const message = enhancedContent.isProcessed ? "AI\u589E\u5F3A\u5904\u7406\u5B8C\u6210\uFF0C\u8BF7\u624B\u52A8\u4FDD\u5B58\u7B14\u8BB0" : "\u97F3\u9891\u8F6C\u5F55\u5B8C\u6210\uFF0C\u8BF7\u624B\u52A8\u4FDD\u5B58\u7B14\u8BB0";
         new import_obsidian4.Notice(message);
       }
     } catch (error) {

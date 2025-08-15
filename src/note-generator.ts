@@ -1,4 +1,5 @@
 import { App, TFile } from 'obsidian';
+import { EnhancedProcessingResult, StructuredTags } from './text-processor';
 
 export interface NoteMetadata {
     title: string;
@@ -22,6 +23,149 @@ export interface ProcessedContent {
 
 export class NoteGenerator {
     constructor(private app: App) {}
+
+    /**
+     * 生成增强的笔记内容（支持YAML front matter和结构化内容）
+     */
+    generateEnhancedNoteContent(
+        enhancedResult: EnhancedProcessingResult,
+        metadata: NoteMetadata
+    ): string {
+        let content = '';
+
+        // 生成YAML front matter
+        content += this.generateYAMLFrontMatter(enhancedResult, metadata);
+        
+        // 生成标题
+        const smartTitle = this.formatSmartTitle(enhancedResult.smartTitle, metadata.timestamp);
+        content += `# ${smartTitle}\n\n`;
+
+        // 生成三部分内容结构
+        
+        // 1. 原音频部分
+        if (metadata.audioFilePath) {
+            content += `## 🎧 原音频\n\n`;
+            content += `![[${metadata.audioFilePath}]]\n\n`;
+        }
+
+        // 2. 转录文字部分
+        content += `## 📝 转录文字\n\n`;
+        content += enhancedResult.originalText + '\n\n';
+
+        // 3. 笔记概要部分
+        content += `## 📋 笔记概要\n\n`;
+        content += enhancedResult.summary + '\n\n';
+
+        return content;
+    }
+
+    /**
+     * 生成YAML front matter
+     */
+    private generateYAMLFrontMatter(
+        enhancedResult: EnhancedProcessingResult,
+        metadata: NoteMetadata
+    ): string {
+        const yaml = [];
+        yaml.push('---');
+        
+        // 基本信息
+        yaml.push(`created: ${metadata.timestamp.toISOString()}`);
+        yaml.push(`title: "${this.formatSmartTitle(enhancedResult.smartTitle, metadata.timestamp)}"`);
+        
+        if (metadata.duration) {
+            yaml.push(`duration: "${metadata.duration}"`);
+        }
+        
+        // 结构化标签
+        const allTags = this.combineStructuredTags(enhancedResult.structuredTags);
+        if (allTags.length > 0) {
+            yaml.push('tags:');
+            allTags.forEach(tag => {
+                yaml.push(`  - "${tag}"`);
+            });
+        }
+        
+        // AI处理信息
+        yaml.push(`processed: ${enhancedResult.isProcessed}`);
+        yaml.push(`model: "${metadata.model}"`);
+        
+        if (metadata.textModel && enhancedResult.isProcessed) {
+            yaml.push(`text_model: "${metadata.textModel}"`);
+        }
+        
+        // 音频文件信息
+        if (metadata.audioFileName) {
+            yaml.push(`audio_file: "${metadata.audioFilePath}"`);
+        }
+        
+        // 概要信息
+        if (enhancedResult.summary && enhancedResult.summary !== enhancedResult.originalText) {
+            const escapedSummary = enhancedResult.summary.replace(/"/g, '\\"');
+            yaml.push(`summary: "${escapedSummary}"`);
+        }
+        
+        yaml.push('---');
+        yaml.push('');
+        
+        return yaml.join('\n');
+    }
+
+    /**
+     * 合并结构化标签为扁平数组
+     */
+    private combineStructuredTags(structuredTags: StructuredTags): string[] {
+        const tags: string[] = [];
+        
+        // 人物标签
+        structuredTags.people.forEach(person => {
+            tags.push(`人物/${person}`);
+        });
+        
+        // 事件标签
+        structuredTags.events.forEach(event => {
+            tags.push(`事件/${event}`);
+        });
+        
+        // 主题标签
+        structuredTags.topics.forEach(topic => {
+            tags.push(`主题/${topic}`);
+        });
+        
+        // 时间标签
+        structuredTags.times.forEach(time => {
+            tags.push(`时间/${time}`);
+        });
+        
+        // 地点标签
+        structuredTags.locations.forEach(location => {
+            tags.push(`地点/${location}`);
+        });
+        
+        // 默认标签
+        tags.push('语音笔记');
+        
+        return tags;
+    }
+
+    /**
+     * 格式化智能标题
+     */
+    private formatSmartTitle(smartTitle: string, timestamp: Date): string {
+        const dateStr = timestamp.toLocaleDateString('zh-CN', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit'
+        }).replace(/\//g, '-');
+        
+        const timeStr = timestamp.toLocaleTimeString('zh-CN', {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+        });
+        
+        return `${dateStr} ${timeStr} - ${smartTitle}`;
+    }
 
     /**
      * 生成笔记内容（新版本，支持AI处理结果）
