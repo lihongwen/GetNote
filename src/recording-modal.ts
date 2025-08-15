@@ -2,11 +2,13 @@ import { Modal, App, ButtonComponent, Notice } from 'obsidian';
 import { AudioRecorder } from './recorder';
 
 export type RecordingState = 'idle' | 'recording' | 'paused' | 'saving-audio' | 'transcribing' | 'processing' | 'saving';
+export type CloseReason = 'normal' | 'cancelled' | 'manual';
 
 export class RecordingModal extends Modal {
     private audioRecorder: AudioRecorder | null = null;
     private state: RecordingState = 'idle';
     private timerInterval: number | null = null;
+    private closeReason: CloseReason = 'manual'; // 默认为手动关闭
     
     // UI Elements - 简化设计
     private statusContainer: HTMLElement;
@@ -120,7 +122,13 @@ export class RecordingModal extends Modal {
             return;
         }
 
-        // 检查是否需要确认关闭
+        // 正常完成录音，直接关闭无需确认
+        if (this.closeReason === 'normal') {
+            this.confirmClose();
+            return;
+        }
+
+        // 检查是否需要确认关闭（手动关闭或用户取消时）
         if (this.shouldConfirmClose()) {
             this.showCloseConfirmation();
             return; // 阻止立即关闭，等待用户确认
@@ -134,12 +142,17 @@ export class RecordingModal extends Modal {
      * 检查是否需要确认关闭
      */
     private shouldConfirmClose(): boolean {
+        // 正常完成不需要确认
+        if (this.closeReason === 'normal') {
+            return false;
+        }
+
         // idle状态不需要确认
         if (this.state === 'idle') {
             return false;
         }
 
-        // 其他状态都需要确认
+        // 用户取消或手动关闭时，根据状态判断是否需要确认
         return this.state === 'recording' || 
                this.state === 'paused' || 
                this.state === 'saving-audio' ||
@@ -237,6 +250,7 @@ export class RecordingModal extends Modal {
         // 重置状态
         this.state = 'idle';
         this.isClosing = false;
+        this.closeReason = 'manual'; // 重置关闭原因
     }
 
     private async handleStart() {
@@ -291,6 +305,8 @@ export class RecordingModal extends Modal {
     }
 
     private handleCancel() {
+        // 设置为用户取消，需要确认对话框
+        this.closeReason = 'cancelled';
         // 直接触发关闭确认流程
         this.showCloseConfirmation();
     }
@@ -302,6 +318,9 @@ export class RecordingModal extends Modal {
                 clearInterval(this.timerInterval);
                 this.timerInterval = null;
             }
+            
+            // 设置为正常完成，不需要确认对话框
+            this.closeReason = 'normal';
             
             // 注意：不在这里设置transcribing状态，因为可能需要先保存音频
             // 状态将由main.ts中的处理流程控制

@@ -1226,6 +1226,7 @@ var RecordingModal = class extends import_obsidian3.Modal {
     this.audioRecorder = null;
     this.state = "idle";
     this.timerInterval = null;
+    this.closeReason = "manual";
     // 新增取消回调
     // Processing state
     this.enableLLMProcessing = false;
@@ -1273,6 +1274,10 @@ var RecordingModal = class extends import_obsidian3.Modal {
       this.performCleanup();
       return;
     }
+    if (this.closeReason === "normal") {
+      this.confirmClose();
+      return;
+    }
     if (this.shouldConfirmClose()) {
       this.showCloseConfirmation();
       return;
@@ -1283,6 +1288,9 @@ var RecordingModal = class extends import_obsidian3.Modal {
    * 检查是否需要确认关闭
    */
   shouldConfirmClose() {
+    if (this.closeReason === "normal") {
+      return false;
+    }
     if (this.state === "idle") {
       return false;
     }
@@ -1351,6 +1359,7 @@ var RecordingModal = class extends import_obsidian3.Modal {
     this.audioRecorder = null;
     this.state = "idle";
     this.isClosing = false;
+    this.closeReason = "manual";
   }
   async handleStart() {
     var _a;
@@ -1391,6 +1400,7 @@ var RecordingModal = class extends import_obsidian3.Modal {
     }
   }
   handleCancel() {
+    this.closeReason = "cancelled";
     this.showCloseConfirmation();
   }
   async handleRecordingComplete(audioBlob) {
@@ -1399,6 +1409,7 @@ var RecordingModal = class extends import_obsidian3.Modal {
         clearInterval(this.timerInterval);
         this.timerInterval = null;
       }
+      this.closeReason = "normal";
       await this.onRecordingComplete(audioBlob);
       this.close();
     } catch (error) {
