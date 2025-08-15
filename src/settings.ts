@@ -20,6 +20,8 @@ export interface GetNoteSettings {
     processOriginalText: boolean;
     generateTags: boolean;
     maxRetries: number;
+    // 音频保留设置
+    keepOriginalAudio: boolean;
 }
 
 export const DEFAULT_SETTINGS: GetNoteSettings = {
@@ -38,7 +40,9 @@ export const DEFAULT_SETTINGS: GetNoteSettings = {
     textModel: 'qwen-plus-latest',
     processOriginalText: true,
     generateTags: true,
-    maxRetries: 2
+    maxRetries: 2,
+    // 音频保留默认设置
+    keepOriginalAudio: false
 };
 
 export class GetNoteSettingTab extends PluginSettingTab {
@@ -229,6 +233,16 @@ export class GetNoteSettingTab extends PluginSettingTab {
                 .onChange(async (value) => {
                     const duration = parseInt(value) || 300;
                     this.plugin.settings.maxRecordingDuration = Math.max(30, Math.min(1800, duration));
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('保留原音频文件')
+            .setDesc('在生成文字笔记的同时保存原音频文件，可随时回听录音内容（会占用更多存储空间）')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.keepOriginalAudio)
+                .onChange(async (value) => {
+                    this.plugin.settings.keepOriginalAudio = value;
                     await this.plugin.saveSettings();
                 }));
     }

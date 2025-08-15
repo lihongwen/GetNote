@@ -9,6 +9,8 @@ export interface NoteMetadata {
     model: string;
     textModel?: string; // AI文本处理模型
     isProcessed?: boolean; // 是否经过AI处理
+    audioFileName?: string; // 音频文件名
+    audioFilePath?: string; // 音频文件相对路径
 }
 
 export interface ProcessedContent {
@@ -41,6 +43,13 @@ export class NoteGenerator {
             content += this.formatTagsForObsidian(processedContent.tags) + '\n\n';
         } else {
             content += '#语音笔记\n\n';
+        }
+
+        // 音频文件链接（如果有）
+        if (metadata.audioFilePath) {
+            content += `## 🎧 原音频\n\n`;
+            content += `![[${metadata.audioFilePath}]]\n\n`;
+            content += `> 💾 音频文件: ${metadata.audioFileName || '未知'}\n\n`;
         }
 
         // 简化的元数据（可选）
@@ -331,5 +340,76 @@ export class NoteGenerator {
         };
 
         return templates[templateType];
+    }
+
+    /**
+     * 保存音频文件到vault
+     */
+    async saveAudioFile(
+        audioBlob: Blob,
+        folderPath: string,
+        fileName: string
+    ): Promise<{ audioFile: TFile, audioFilePath: string }> {
+        // 确保音频文件夹存在
+        const audioFolderPath = `${folderPath}/audio`;
+        await this.ensureFolderExists(audioFolderPath);
+        
+        // 检测音频格式
+        const audioFormat = this.detectAudioFormat(audioBlob);
+        const audioFileName = fileName.replace('.md', audioFormat);
+        
+        // 构建完整音频文件路径
+        const fullAudioPath = `${audioFolderPath}/${audioFileName}`;
+        
+        // 检查文件是否已存在，如果存在则添加序号
+        const finalAudioPath = await this.getUniqueFilePath(fullAudioPath);
+        
+        // 将Blob转换为ArrayBuffer
+        const arrayBuffer = await audioBlob.arrayBuffer();
+        
+        // 创建音频文件
+        const audioFile = await this.app.vault.createBinary(finalAudioPath, arrayBuffer);
+        
+        // 返回相对于笔记文件夹的路径
+        const relativePath = finalAudioPath.replace(`${folderPath}/`, '');
+        
+        return { audioFile, audioFilePath: relativePath };
+    }
+
+    /**
+     * 检测音频格式并返回对应的文件扩展名
+     */
+    private detectAudioFormat(audioBlob: Blob): string {
+        const mimeType = audioBlob.type.toLowerCase();
+        
+        if (mimeType.includes('webm')) {
+            return '.webm';
+        } else if (mimeType.includes('wav')) {
+            return '.wav';
+        } else if (mimeType.includes('mp3') || mimeType.includes('mpeg')) {
+            return '.mp3';
+        } else if (mimeType.includes('ogg')) {
+            return '.ogg';
+        } else if (mimeType.includes('mp4') || mimeType.includes('m4a')) {
+            return '.m4a';
+        } else {
+            // 默认使用webm格式
+            return '.webm';
+        }
+    }
+
+    /**
+     * 生成音频文件名（基于笔记文件名）
+     */
+    generateAudioFileName(noteFileName: string): string {
+        // 将.md替换为对应的音频格式，在saveAudioFile中会根据实际格式调整
+        return noteFileName.replace('.md', '.webm');
+    }
+
+    /**
+     * 检查是否支持保存二进制文件
+     */
+    static isAudioSaveSupported(): boolean {
+        return typeof ArrayBuffer !== 'undefined';
     }
 }

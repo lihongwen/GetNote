@@ -120,7 +120,49 @@ export default class GetNotePlugin extends Plugin {
 				return;
 			}
 
+			// 阶段0：保存音频文件（如果启用）
+			let audioMetadata: { audioFileName?: string; audioFilePath?: string } = {};
+			if (this.settings.keepOriginalAudio) {
+				try {
+					// 更新界面状态
+					if (this.recordingModal) {
+						this.recordingModal.updateProcessingState('saving-audio');
+					}
+					
+					new Notice('正在保存音频文件...');
+					console.log('开始保存音频文件');
+					
+					const tempFileName = this.noteGenerator.generateFileName('语音转录', new Date());
+					const audioResult = await this.noteGenerator.saveAudioFile(
+						audioBlob,
+						this.settings.outputFolder,
+						tempFileName
+					);
+					
+					audioMetadata = {
+						audioFileName: audioResult.audioFile.name,
+						audioFilePath: audioResult.audioFilePath
+					};
+					
+					console.log('音频文件保存完成:', audioResult.audioFilePath);
+				} catch (audioSaveError) {
+					console.error('保存音频文件失败:', audioSaveError);
+					new Notice('保存音频文件失败，但会继续进行文字转录');
+					// 音频保存失败不应阻止转录过程
+				}
+				
+				// 检查音频保存后是否被取消
+				if (this.isProcessingCancelled) {
+					console.log('音频保存后被用户取消');
+					return;
+				}
+			}
+
 			// 阶段1：语音转文字
+			if (this.recordingModal) {
+				this.recordingModal.updateProcessingState('transcribing');
+			}
+			
 			new Notice('正在调用AI转录音频...');
 			console.log('开始语音转录处理');
 
@@ -190,7 +232,10 @@ export default class GetNotePlugin extends Plugin {
 				processingTime: this.noteGenerator.formatDuration(processingDuration),
 				model: this.settings.modelName,
 				textModel: this.settings.enableLLMProcessing ? this.settings.textModel : undefined,
-				isProcessed: processedContent.isProcessed
+				isProcessed: processedContent.isProcessed,
+				// 添加音频文件信息
+				audioFileName: audioMetadata.audioFileName,
+				audioFilePath: audioMetadata.audioFilePath
 			};
 
 			// 生成笔记内容（使用新的AI增强方法）
@@ -210,10 +255,14 @@ export default class GetNotePlugin extends Plugin {
 				);
 				
 				// 根据处理结果显示不同的完成消息
+				const audioSavedMessage = this.settings.keepOriginalAudio && audioMetadata.audioFileName 
+					? '，原音频已保存' 
+					: '';
+					
 				if (processedContent.isProcessed) {
-					new Notice(`AI处理完成！笔记已保存: ${savedFile.name}，包含${processedContent.tags.length}个标签`);
+					new Notice(`AI处理完成！笔记已保存: ${savedFile.name}，包含${processedContent.tags.length}个标签${audioSavedMessage}`);
 				} else {
-					new Notice(`转录完成，笔记已保存: ${savedFile.name}`);
+					new Notice(`转录完成，笔记已保存: ${savedFile.name}${audioSavedMessage}`);
 				}
 				
 				console.log('笔记保存完成:', savedFile.path);

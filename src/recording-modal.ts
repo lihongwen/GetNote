@@ -1,7 +1,7 @@
 import { Modal, App, ButtonComponent, Notice } from 'obsidian';
 import { AudioRecorder } from './recorder';
 
-export type RecordingState = 'idle' | 'recording' | 'paused' | 'transcribing' | 'processing' | 'saving';
+export type RecordingState = 'idle' | 'recording' | 'paused' | 'saving-audio' | 'transcribing' | 'processing' | 'saving';
 
 export class RecordingModal extends Modal {
     private audioRecorder: AudioRecorder | null = null;
@@ -142,6 +142,7 @@ export class RecordingModal extends Modal {
         // 其他状态都需要确认
         return this.state === 'recording' || 
                this.state === 'paused' || 
+               this.state === 'saving-audio' ||
                this.state === 'transcribing' || 
                this.state === 'processing' || 
                this.state === 'saving';
@@ -168,6 +169,9 @@ export class RecordingModal extends Modal {
             case 'recording':
             case 'paused':
                 return '确定要取消录音吗？\n\n录音内容将会丢失，无法恢复。';
+            
+            case 'saving-audio':
+                return '正在保存音频文件，确定要取消吗？\n\n录音和音频文件将会丢失。';
             
             case 'transcribing':
                 return '正在转录音频，确定要取消吗？\n\n已录制的内容将会丢失。';
@@ -299,8 +303,8 @@ export class RecordingModal extends Modal {
                 this.timerInterval = null;
             }
             
-            // 显示处理状态
-            this.setState('transcribing');
+            // 注意：不在这里设置transcribing状态，因为可能需要先保存音频
+            // 状态将由main.ts中的处理流程控制
             
             // 调用回调处理录音数据
             await this.onRecordingComplete(audioBlob);
@@ -371,6 +375,19 @@ export class RecordingModal extends Modal {
                 this.cancelButton.setDisabled(false);
                 break;
                 
+            case 'saving-audio':
+                this.statusContainer.addClass('status-recording'); // 使用录音状态的样式
+                this.statusText.textContent = '💾 保存音频...';
+                this.timeDisplay.removeClass('recording');
+                this.hintText.textContent = '正在保存音频文件，请稍候...';
+                
+                // 禁用所有按钮
+                this.startButton.setDisabled(true);
+                this.pauseButton.setDisabled(true);
+                this.stopButton.setDisabled(true);
+                this.cancelButton.setDisabled(false).setButtonText('❌ 取消');
+                break;
+                
             case 'transcribing':
                 this.statusContainer.addClass('status-recording'); // 使用录音状态的样式
                 this.statusText.textContent = '🔄 正在转录...';
@@ -429,7 +446,7 @@ export class RecordingModal extends Modal {
     }
 
     // 公共方法：允许外部更新处理状态
-    public updateProcessingState(state: 'transcribing' | 'processing' | 'saving') {
+    public updateProcessingState(state: 'saving-audio' | 'transcribing' | 'processing' | 'saving') {
         this.setState(state);
     }
 } 
