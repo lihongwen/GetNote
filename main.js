@@ -1815,6 +1815,7 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
     this.addSettingTab(new GetNoteSettingTab(this.app, this));
   }
   onunload() {
+    this.isProcessingCancelled = true;
     if (this.recordingModal) {
       this.recordingModal.close();
       this.recordingModal = null;
@@ -1978,22 +1979,24 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
         const message = enhancedContent.isProcessed ? "AI\u589E\u5F3A\u5904\u7406\u5B8C\u6210\uFF0C\u8BF7\u624B\u52A8\u4FDD\u5B58\u7B14\u8BB0" : "\u97F3\u9891\u8F6C\u5F55\u5B8C\u6210\uFF0C\u8BF7\u624B\u52A8\u4FDD\u5B58\u7B14\u8BB0";
         new import_obsidian4.Notice(message);
       }
+      this.recordingModal = null;
     } catch (error) {
       console.error("\u5904\u7406\u97F3\u9891\u65F6\u51FA\u9519:", error);
       new import_obsidian4.Notice(`\u5904\u7406\u97F3\u9891\u65F6\u51FA\u9519: ${error.message}`);
       if (this.recordingModal) {
         this.recordingModal.close();
       }
+      this.recordingModal = null;
     }
   }
   handleRecordingError(error) {
     console.error("\u5F55\u97F3\u9519\u8BEF:", error);
     new import_obsidian4.Notice(`\u5F55\u97F3\u51FA\u9519: ${error.message}`);
+    this.recordingModal = null;
   }
   handleRecordingCancel() {
     console.log("\u7528\u6237\u53D6\u6D88\u4E86\u5F55\u97F3");
     this.isProcessingCancelled = true;
-    this.recordingModal = null;
     new import_obsidian4.Notice("\u5F55\u97F3\u5DF2\u53D6\u6D88");
   }
 };

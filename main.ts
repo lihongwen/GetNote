@@ -48,7 +48,8 @@ export default class GetNotePlugin extends Plugin {
 	}
 
 	onunload() {
-		// 清理录音Modal
+		// 设置取消标志并清理录音Modal
+		this.isProcessingCancelled = true;
 		if (this.recordingModal) {
 			this.recordingModal.close();
 			this.recordingModal = null;
@@ -276,6 +277,9 @@ export default class GetNotePlugin extends Plugin {
 					: '音频转录完成，请手动保存笔记';
 				new Notice(message);
 			}
+			
+			// 清理录音Modal引用（正常完成）
+			this.recordingModal = null;
 
 		} catch (error) {
 			console.error('处理音频时出错:', error);
@@ -285,20 +289,22 @@ export default class GetNotePlugin extends Plugin {
 			if (this.recordingModal) {
 				this.recordingModal.close();
 			}
+			// 清理录音Modal引用（错误情况）
+			this.recordingModal = null;
 		}
 	}
 
 	private handleRecordingError(error: Error) {
 		console.error('录音错误:', error);
 		new Notice(`录音出错: ${error.message}`);
+		
+		// 清理录音Modal引用
+		this.recordingModal = null;
 	}
 
 	private handleRecordingCancel() {
 		console.log('用户取消了录音');
 		this.isProcessingCancelled = true;
-		
-		// 清理录音Modal引用
-		this.recordingModal = null;
 		
 		new Notice('录音已取消');
 	}
