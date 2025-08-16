@@ -29,8 +29,12 @@ export class RecordingModal extends Modal {
     // Processing state
     private enableLLMProcessing: boolean = false;
     
-    // Cancel confirmation
+    // Cancel confirmation and protection mechanism
     private isClosing: boolean = false;
+    private isDestroying: boolean = false;
+    private hasNotifiedCancel: boolean = false;
+    private closeCallCount: number = 0;
+    private destroyTimeout: number | null = null;
 
     constructor(
         app: App, 
@@ -116,32 +120,48 @@ export class RecordingModal extends Modal {
     }
 
     onClose() {
-        // 如果已经在关闭过程中，直接执行清理
-        if (this.isClosing) {
+        console.log(`[SAFE] Modal onClose 被调用，状态: ${this.state}, 原因: ${this.closeReason}, isDestroying: ${this.isDestroying}`);
+        
+        // 第一层防护：防止重复执行
+        if (this.isDestroying) {
+            console.log('[SAFE] Modal已在销毁过程中，跳过onClose处理');
+            return;
+        }
+
+        // 立即设置销毁状态，防止重复调用
+        this.isDestroying = true;
+        
+        try {
+            // 只做资源清理工作，不做任何关闭操作
             this.performCleanup();
-            return;
+            
+            // 如果需要确认且还没确认，则显示确认对话框
+            if (this.shouldConfirmClose() && this.closeReason !== 'normal') {
+                console.log('[SAFE] 需要用户确认，显示确认对话框');
+                // 重置销毁状态，允许用户选择
+                this.isDestroying = false;
+                this.showCloseConfirmation();
+                return;
+            }
+            
+            // 通知取消（如果需要）
+            this.notifyCancellation();
+            
+            console.log('[SAFE] Modal onClose 清理完成');
+        } catch (error) {
+            console.error('[SAFE] Modal onClose 清理时出错:', error);
         }
-
-        // 正常完成录音，直接关闭无需确认
-        if (this.closeReason === 'normal') {
-            this.confirmClose();
-            return;
-        }
-
-        // 检查是否需要确认关闭（手动关闭或用户取消时）
-        if (this.shouldConfirmClose()) {
-            this.showCloseConfirmation();
-            return; // 阻止立即关闭，等待用户确认
-        }
-
-        // 直接关闭（idle状态或其他不需要确认的情况）
-        this.confirmClose();
     }
 
     /**
      * 检查是否需要确认关闭
      */
     private shouldConfirmClose(): boolean {
+        // 如果已经在关闭过程中，不需要确认
+        if (this.isClosing) {
+            return false;
+        }
+
         // 正常完成不需要确认
         if (this.closeReason === 'normal') {
             return false;
@@ -166,12 +186,21 @@ export class RecordingModal extends Modal {
      */
     private showCloseConfirmation(): void {
         const message = this.getConfirmationMessage();
-        const confirmed = confirm(message);
         
-        if (confirmed) {
-            this.confirmClose();
-        }
-        // 如果用户取消，什么都不做，继续当前状态
+        // 使用异步方式显示确认对话框，避免阻塞调用栈
+        setTimeout(() => {
+            const confirmed = confirm(message);
+            
+            if (confirmed) {
+                console.log('[SAFE] 用户确认关闭，执行安全关闭流程');
+                this.safeClose();
+            } else {
+                console.log('[SAFE] 用户取消关闭确认，继续当前状态');
+                // 重置状态，允许继续操作
+                this.isDestroying = false;
+                this.closeReason = 'manual';
+            }
+        }, 10);
     }
 
     /**
@@ -201,30 +230,103 @@ export class RecordingModal extends Modal {
     }
 
     /**
-     * 确认关闭并执行清理
+     * 安全关闭Modal - 使用异步机制防止递归
      */
-    private confirmClose(): void {
-        this.isClosing = true;
+    private safeClose(): void {
+        console.log(`[SAFE] safeClose 被调用，closeCallCount: ${this.closeCallCount}`);
         
-        // 通知外部取消处理（如果正在进行API调用）
+        // 第二层防护：递归检测
+        this.closeCallCount++;
+        if (this.closeCallCount > 3) {
+            console.error('[SAFE] 检测到过多关闭调用，强制中断');
+            this.forceDestroy();
+            return;
+        }
+        
+        // 第一层防护：使用 setTimeout 打破调用栈
+        if (this.destroyTimeout) {
+            clearTimeout(this.destroyTimeout);
+        }
+        
+        this.destroyTimeout = window.setTimeout(() => {
+            try {
+                console.log('[SAFE] 异步执行Modal关闭');
+                
+                // 设置关闭状态
+                this.isClosing = true;
+                this.isDestroying = true;
+                
+                // 执行最终的清理和通知
+                this.performFinalCleanup();
+                
+                // 使用原生DOM方法关闭，避免触发onClose
+                this.containerEl.remove();
+                
+                console.log('[SAFE] Modal已安全关闭');
+            } catch (error) {
+                console.error('[SAFE] 安全关闭过程中出错:', error);
+                this.forceDestroy();
+            }
+        }, 0);
+    }
+
+    /**
+     * 强制销毁Modal（紧急情况使用）
+     */
+    private forceDestroy(): void {
+        console.log('[SAFE] 强制销毁Modal');
+        try {
+            this.isClosing = true;
+            this.isDestroying = true;
+            
+            // 清理所有定时器
+            if (this.destroyTimeout) {
+                clearTimeout(this.destroyTimeout);
+                this.destroyTimeout = null;
+            }
+            
+            // 强制清理资源
+            this.performCleanup();
+            
+            // 直接移除DOM元素
+            if (this.containerEl && this.containerEl.parentNode) {
+                this.containerEl.parentNode.removeChild(this.containerEl);
+            }
+        } catch (error) {
+            console.error('[SAFE] 强制销毁时出错:', error);
+        }
+    }
+
+    /**
+     * 执行最终清理（包含通知）
+     */
+    private performFinalCleanup(): void {
+        // 通知外部取消处理
         this.notifyCancellation();
         
-        // 执行清理
+        // 执行基础清理
         this.performCleanup();
-        
-        // 关闭Modal
-        super.close();
     }
 
     /**
      * 通知外部取消当前处理
      */
     private notifyCancellation(): void {
-        console.log(`取消录音，当前状态: ${this.state}`);
+        console.log(`取消录音，当前状态: ${this.state}, 关闭原因: ${this.closeReason}`);
         
-        // 调用取消回调，通知主程序用户取消了操作
-        if (this.onCancel) {
+        // 防止重复通知
+        if (this.hasNotifiedCancel) {
+            console.log('已通知取消，跳过重复调用');
+            return;
+        }
+        
+        // 只在用户主动取消时调用取消回调
+        if (this.closeReason === 'cancelled' && this.onCancel) {
+            console.log('调用取消回调通知主程序');
+            this.hasNotifiedCancel = true;
             this.onCancel();
+        } else {
+            console.log('非用户主动取消，跳过取消回调');
         }
     }
 
@@ -236,6 +338,12 @@ export class RecordingModal extends Modal {
         if (this.timerInterval) {
             clearInterval(this.timerInterval);
             this.timerInterval = null;
+        }
+        
+        // 清理销毁定时器
+        if (this.destroyTimeout) {
+            clearTimeout(this.destroyTimeout);
+            this.destroyTimeout = null;
         }
         
         // 如果正在录音，先停止
@@ -251,6 +359,8 @@ export class RecordingModal extends Modal {
         this.state = 'idle';
         this.isClosing = false;
         this.closeReason = 'manual'; // 重置关闭原因
+        this.hasNotifiedCancel = false; // 重置取消通知标志
+        this.closeCallCount = 0; // 重置调用计数器
     }
 
     private async handleStart() {
@@ -305,6 +415,7 @@ export class RecordingModal extends Modal {
     }
 
     private handleCancel() {
+        console.log('[SAFE] 用户点击取消按钮');
         // 设置为用户取消，需要确认对话框
         this.closeReason = 'cancelled';
         // 直接触发关闭确认流程
@@ -328,8 +439,8 @@ export class RecordingModal extends Modal {
             // 调用回调处理录音数据
             await this.onRecordingComplete(audioBlob);
             
-            // 完成后关闭Modal
-            this.close();
+            // 完成后安全关闭Modal
+            this.safeClose();
             
         } catch (error) {
             this.setState('idle');
@@ -338,7 +449,21 @@ export class RecordingModal extends Modal {
     }
 
     private handleRecordingError(error: Error) {
+        console.log('[SAFE] 录音错误，重置状态');
         this.setState('idle');
+        
+        // 错误恢复：重置所有保护状态
+        this.isClosing = false;
+        this.isDestroying = false;
+        this.hasNotifiedCancel = false;
+        this.closeCallCount = 0;
+        
+        // 清理定时器
+        if (this.destroyTimeout) {
+            clearTimeout(this.destroyTimeout);
+            this.destroyTimeout = null;
+        }
+        
         this.onError(error);
     }
 

@@ -91,6 +91,9 @@ export default class GetNotePlugin extends Plugin {
 			return;
 		}
 
+		// 重置取消状态（开始新录音时）
+		this.isProcessingCancelled = false;
+
 		// 创建并打开录音Modal
 		this.recordingModal = new RecordingModal(
 			this.app,
@@ -285,12 +288,23 @@ export default class GetNotePlugin extends Plugin {
 			console.error('处理音频时出错:', error);
 			new Notice(`处理音频时出错: ${error.message}`);
 			
-			// 发生错误时重置界面状态
+			// 错误恢复：重置所有处理状态
+			this.isProcessingCancelled = true;
+			
+			// 安全清理录音Modal引用和状态
 			if (this.recordingModal) {
-				this.recordingModal.close();
+				try {
+					// 尝试正常关闭Modal，避免触发无限循环
+					this.recordingModal.close();
+				} catch (modalError) {
+					console.error('错误处理期间关闭Modal失败:', modalError);
+					// 即使关闭失败也要清理引用
+				} finally {
+					this.recordingModal = null;
+				}
+			} else {
+				this.recordingModal = null;
 			}
-			// 清理录音Modal引用（错误情况）
-			this.recordingModal = null;
 		}
 	}
 
@@ -298,14 +312,41 @@ export default class GetNotePlugin extends Plugin {
 		console.error('录音错误:', error);
 		new Notice(`录音出错: ${error.message}`);
 		
-		// 清理录音Modal引用
-		this.recordingModal = null;
+		// 错误恢复：重置处理状态和清理Modal
+		this.isProcessingCancelled = true;
+		
+		// 安全清理录音Modal引用
+		if (this.recordingModal) {
+			try {
+				// 尝试正常关闭Modal
+				this.recordingModal.close();
+			} catch (modalError) {
+				console.error('关闭Modal时出错:', modalError);
+				// 强制清理引用，防止悬挂状态
+			} finally {
+				this.recordingModal = null;
+			}
+		} else {
+			this.recordingModal = null;
+		}
 	}
 
 	private handleRecordingCancel() {
+		// 防止重复调用
+		if (this.isProcessingCancelled) {
+			console.log('取消已处理，忽略重复调用');
+			return;
+		}
+		
 		console.log('用户取消了录音');
 		this.isProcessingCancelled = true;
 		
+		// 只显示一次取消通知
 		new Notice('录音已取消');
+		
+		// 清理Modal引用
+		if (this.recordingModal) {
+			this.recordingModal = null;
+		}
 	}
 }

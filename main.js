@@ -539,10 +539,11 @@ var NoteGenerator = class {
   generateYAMLFrontMatter(enhancedResult, metadata) {
     const yaml = [];
     yaml.push("---");
-    yaml.push(`created: ${metadata.timestamp.toISOString()}`);
-    yaml.push(`title: "${this.formatSmartTitle(enhancedResult.smartTitle, metadata.timestamp)}"`);
+    yaml.push(`created: ${this.formatObsidianDate(metadata.timestamp)}`);
+    yaml.push(`title: "${this.escapeYamlValue(this.formatSmartTitle(enhancedResult.smartTitle, metadata.timestamp))}"`);
+    yaml.push(`note_type: "voice_note"`);
     if (metadata.duration) {
-      yaml.push(`duration: "${metadata.duration}"`);
+      yaml.push(`duration: "${this.escapeYamlValue(metadata.duration)}"`);
     }
     const allTags = this.combineStructuredTags(enhancedResult.structuredTags);
     if (allTags.length > 0) {
@@ -551,8 +552,8 @@ var NoteGenerator = class {
         yaml.push(`  - "${tag}"`);
       });
     }
-    yaml.push(`processed: ${enhancedResult.isProcessed}`);
-    yaml.push(`model: "${metadata.model}"`);
+    yaml.push(`ai_processed: ${enhancedResult.isProcessed}`);
+    yaml.push(`speech_model: "${metadata.model}"`);
     if (metadata.textModel && enhancedResult.isProcessed) {
       yaml.push(`text_model: "${metadata.textModel}"`);
     }
@@ -560,8 +561,7 @@ var NoteGenerator = class {
       yaml.push(`audio_file: "${metadata.audioFilePath}"`);
     }
     if (enhancedResult.summary && enhancedResult.summary !== enhancedResult.originalText) {
-      const escapedSummary = enhancedResult.summary.replace(/"/g, '\\"');
-      yaml.push(`summary: "${escapedSummary}"`);
+      yaml.push(`summary: "${this.escapeYamlValue(enhancedResult.summary)}"`);
     }
     yaml.push("---");
     yaml.push("");
@@ -573,22 +573,45 @@ var NoteGenerator = class {
   combineStructuredTags(structuredTags) {
     const tags = [];
     structuredTags.people.forEach((person) => {
-      tags.push(`\u4EBA\u7269/${person}`);
+      tags.push(`\u4EBA\u7269-${this.normalizeTagName(person)}`);
     });
     structuredTags.events.forEach((event) => {
-      tags.push(`\u4E8B\u4EF6/${event}`);
+      tags.push(`\u4E8B\u4EF6-${this.normalizeTagName(event)}`);
     });
     structuredTags.topics.forEach((topic) => {
-      tags.push(`\u4E3B\u9898/${topic}`);
+      tags.push(`\u4E3B\u9898-${this.normalizeTagName(topic)}`);
     });
     structuredTags.times.forEach((time) => {
-      tags.push(`\u65F6\u95F4/${time}`);
+      tags.push(`\u65F6\u95F4-${this.normalizeTagName(time)}`);
     });
     structuredTags.locations.forEach((location) => {
-      tags.push(`\u5730\u70B9/${location}`);
+      tags.push(`\u5730\u70B9-${this.normalizeTagName(location)}`);
     });
     tags.push("\u8BED\u97F3\u7B14\u8BB0");
     return tags;
+  }
+  /**
+   * 规范化标签名称，确保Obsidian兼容性
+   */
+  normalizeTagName(tagName) {
+    return tagName.trim().replace(/\s+/g, "-").replace(/[\/\\]/g, "-").replace(/[^\w\u4e00-\u9fa5-]/g, "").replace(/-+/g, "-").replace(/^-|-$/g, "");
+  }
+  /**
+   * 转义YAML值，确保兼容性
+   */
+  escapeYamlValue(value) {
+    return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t");
+  }
+  /**
+   * 格式化Obsidian标准日期格式
+   */
+  formatObsidianDate(timestamp) {
+    const year = timestamp.getFullYear();
+    const month = String(timestamp.getMonth() + 1).padStart(2, "0");
+    const day = String(timestamp.getDate()).padStart(2, "0");
+    const hour = String(timestamp.getHours()).padStart(2, "0");
+    const minute = String(timestamp.getMinutes()).padStart(2, "0");
+    return `${year}-${month}-${day} ${hour}:${minute}`;
   }
   /**
    * 格式化智能标题
@@ -1494,8 +1517,12 @@ var RecordingModal = class extends import_obsidian3.Modal {
     // 新增取消回调
     // Processing state
     this.enableLLMProcessing = false;
-    // Cancel confirmation
+    // Cancel confirmation and protection mechanism
     this.isClosing = false;
+    this.isDestroying = false;
+    this.hasNotifiedCancel = false;
+    this.closeCallCount = 0;
+    this.destroyTimeout = null;
     this.onRecordingComplete = onRecordingComplete;
     this.onError = onError;
     this.enableLLMProcessing = enableLLMProcessing;
@@ -1534,24 +1561,33 @@ var RecordingModal = class extends import_obsidian3.Modal {
     this.updateUI();
   }
   onClose() {
-    if (this.isClosing) {
+    console.log(`[SAFE] Modal onClose \u88AB\u8C03\u7528\uFF0C\u72B6\u6001: ${this.state}, \u539F\u56E0: ${this.closeReason}, isDestroying: ${this.isDestroying}`);
+    if (this.isDestroying) {
+      console.log("[SAFE] Modal\u5DF2\u5728\u9500\u6BC1\u8FC7\u7A0B\u4E2D\uFF0C\u8DF3\u8FC7onClose\u5904\u7406");
+      return;
+    }
+    this.isDestroying = true;
+    try {
       this.performCleanup();
-      return;
+      if (this.shouldConfirmClose() && this.closeReason !== "normal") {
+        console.log("[SAFE] \u9700\u8981\u7528\u6237\u786E\u8BA4\uFF0C\u663E\u793A\u786E\u8BA4\u5BF9\u8BDD\u6846");
+        this.isDestroying = false;
+        this.showCloseConfirmation();
+        return;
+      }
+      this.notifyCancellation();
+      console.log("[SAFE] Modal onClose \u6E05\u7406\u5B8C\u6210");
+    } catch (error) {
+      console.error("[SAFE] Modal onClose \u6E05\u7406\u65F6\u51FA\u9519:", error);
     }
-    if (this.closeReason === "normal") {
-      this.confirmClose();
-      return;
-    }
-    if (this.shouldConfirmClose()) {
-      this.showCloseConfirmation();
-      return;
-    }
-    this.confirmClose();
   }
   /**
    * 检查是否需要确认关闭
    */
   shouldConfirmClose() {
+    if (this.isClosing) {
+      return false;
+    }
     if (this.closeReason === "normal") {
       return false;
     }
@@ -1565,10 +1601,17 @@ var RecordingModal = class extends import_obsidian3.Modal {
    */
   showCloseConfirmation() {
     const message = this.getConfirmationMessage();
-    const confirmed = confirm(message);
-    if (confirmed) {
-      this.confirmClose();
-    }
+    setTimeout(() => {
+      const confirmed = confirm(message);
+      if (confirmed) {
+        console.log("[SAFE] \u7528\u6237\u786E\u8BA4\u5173\u95ED\uFF0C\u6267\u884C\u5B89\u5168\u5173\u95ED\u6D41\u7A0B");
+        this.safeClose();
+      } else {
+        console.log("[SAFE] \u7528\u6237\u53D6\u6D88\u5173\u95ED\u786E\u8BA4\uFF0C\u7EE7\u7EED\u5F53\u524D\u72B6\u6001");
+        this.isDestroying = false;
+        this.closeReason = "manual";
+      }
+    }, 10);
   }
   /**
    * 根据当前状态获取确认消息
@@ -1591,21 +1634,75 @@ var RecordingModal = class extends import_obsidian3.Modal {
     }
   }
   /**
-   * 确认关闭并执行清理
+   * 安全关闭Modal - 使用异步机制防止递归
    */
-  confirmClose() {
-    this.isClosing = true;
+  safeClose() {
+    console.log(`[SAFE] safeClose \u88AB\u8C03\u7528\uFF0CcloseCallCount: ${this.closeCallCount}`);
+    this.closeCallCount++;
+    if (this.closeCallCount > 3) {
+      console.error("[SAFE] \u68C0\u6D4B\u5230\u8FC7\u591A\u5173\u95ED\u8C03\u7528\uFF0C\u5F3A\u5236\u4E2D\u65AD");
+      this.forceDestroy();
+      return;
+    }
+    if (this.destroyTimeout) {
+      clearTimeout(this.destroyTimeout);
+    }
+    this.destroyTimeout = window.setTimeout(() => {
+      try {
+        console.log("[SAFE] \u5F02\u6B65\u6267\u884CModal\u5173\u95ED");
+        this.isClosing = true;
+        this.isDestroying = true;
+        this.performFinalCleanup();
+        this.containerEl.remove();
+        console.log("[SAFE] Modal\u5DF2\u5B89\u5168\u5173\u95ED");
+      } catch (error) {
+        console.error("[SAFE] \u5B89\u5168\u5173\u95ED\u8FC7\u7A0B\u4E2D\u51FA\u9519:", error);
+        this.forceDestroy();
+      }
+    }, 0);
+  }
+  /**
+   * 强制销毁Modal（紧急情况使用）
+   */
+  forceDestroy() {
+    console.log("[SAFE] \u5F3A\u5236\u9500\u6BC1Modal");
+    try {
+      this.isClosing = true;
+      this.isDestroying = true;
+      if (this.destroyTimeout) {
+        clearTimeout(this.destroyTimeout);
+        this.destroyTimeout = null;
+      }
+      this.performCleanup();
+      if (this.containerEl && this.containerEl.parentNode) {
+        this.containerEl.parentNode.removeChild(this.containerEl);
+      }
+    } catch (error) {
+      console.error("[SAFE] \u5F3A\u5236\u9500\u6BC1\u65F6\u51FA\u9519:", error);
+    }
+  }
+  /**
+   * 执行最终清理（包含通知）
+   */
+  performFinalCleanup() {
     this.notifyCancellation();
     this.performCleanup();
-    super.close();
   }
   /**
    * 通知外部取消当前处理
    */
   notifyCancellation() {
-    console.log(`\u53D6\u6D88\u5F55\u97F3\uFF0C\u5F53\u524D\u72B6\u6001: ${this.state}`);
-    if (this.onCancel) {
+    console.log(`\u53D6\u6D88\u5F55\u97F3\uFF0C\u5F53\u524D\u72B6\u6001: ${this.state}, \u5173\u95ED\u539F\u56E0: ${this.closeReason}`);
+    if (this.hasNotifiedCancel) {
+      console.log("\u5DF2\u901A\u77E5\u53D6\u6D88\uFF0C\u8DF3\u8FC7\u91CD\u590D\u8C03\u7528");
+      return;
+    }
+    if (this.closeReason === "cancelled" && this.onCancel) {
+      console.log("\u8C03\u7528\u53D6\u6D88\u56DE\u8C03\u901A\u77E5\u4E3B\u7A0B\u5E8F");
+      this.hasNotifiedCancel = true;
       this.onCancel();
+    } else {
+      console.log("\u975E\u7528\u6237\u4E3B\u52A8\u53D6\u6D88\uFF0C\u8DF3\u8FC7\u53D6\u6D88\u56DE\u8C03");
     }
   }
   /**
@@ -1616,6 +1713,10 @@ var RecordingModal = class extends import_obsidian3.Modal {
       clearInterval(this.timerInterval);
       this.timerInterval = null;
     }
+    if (this.destroyTimeout) {
+      clearTimeout(this.destroyTimeout);
+      this.destroyTimeout = null;
+    }
     if (this.audioRecorder && this.audioRecorder.getRecordingState()) {
       console.log("\u505C\u6B62\u5F55\u97F3...");
       this.audioRecorder.stopRecording();
@@ -1624,6 +1725,8 @@ var RecordingModal = class extends import_obsidian3.Modal {
     this.state = "idle";
     this.isClosing = false;
     this.closeReason = "manual";
+    this.hasNotifiedCancel = false;
+    this.closeCallCount = 0;
   }
   async handleStart() {
     var _a;
@@ -1664,6 +1767,7 @@ var RecordingModal = class extends import_obsidian3.Modal {
     }
   }
   handleCancel() {
+    console.log("[SAFE] \u7528\u6237\u70B9\u51FB\u53D6\u6D88\u6309\u94AE");
     this.closeReason = "cancelled";
     this.showCloseConfirmation();
   }
@@ -1675,14 +1779,23 @@ var RecordingModal = class extends import_obsidian3.Modal {
       }
       this.closeReason = "normal";
       await this.onRecordingComplete(audioBlob);
-      this.close();
+      this.safeClose();
     } catch (error) {
       this.setState("idle");
       this.onError(error);
     }
   }
   handleRecordingError(error) {
+    console.log("[SAFE] \u5F55\u97F3\u9519\u8BEF\uFF0C\u91CD\u7F6E\u72B6\u6001");
     this.setState("idle");
+    this.isClosing = false;
+    this.isDestroying = false;
+    this.hasNotifiedCancel = false;
+    this.closeCallCount = 0;
+    if (this.destroyTimeout) {
+      clearTimeout(this.destroyTimeout);
+      this.destroyTimeout = null;
+    }
     this.onError(error);
   }
   setState(newState) {
@@ -1849,6 +1962,7 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
       new import_obsidian4.Notice("API\u5BA2\u6237\u7AEF\u672A\u521D\u59CB\u5316\uFF0C\u8BF7\u68C0\u67E5\u8BBE\u7F6E");
       return;
     }
+    this.isProcessingCancelled = false;
     this.recordingModal = new RecordingModal(
       this.app,
       (audioBlob) => this.handleAudioData(audioBlob),
@@ -1983,20 +2097,46 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
     } catch (error) {
       console.error("\u5904\u7406\u97F3\u9891\u65F6\u51FA\u9519:", error);
       new import_obsidian4.Notice(`\u5904\u7406\u97F3\u9891\u65F6\u51FA\u9519: ${error.message}`);
+      this.isProcessingCancelled = true;
       if (this.recordingModal) {
-        this.recordingModal.close();
+        try {
+          this.recordingModal.close();
+        } catch (modalError) {
+          console.error("\u9519\u8BEF\u5904\u7406\u671F\u95F4\u5173\u95EDModal\u5931\u8D25:", modalError);
+        } finally {
+          this.recordingModal = null;
+        }
+      } else {
+        this.recordingModal = null;
       }
-      this.recordingModal = null;
     }
   }
   handleRecordingError(error) {
     console.error("\u5F55\u97F3\u9519\u8BEF:", error);
     new import_obsidian4.Notice(`\u5F55\u97F3\u51FA\u9519: ${error.message}`);
-    this.recordingModal = null;
+    this.isProcessingCancelled = true;
+    if (this.recordingModal) {
+      try {
+        this.recordingModal.close();
+      } catch (modalError) {
+        console.error("\u5173\u95EDModal\u65F6\u51FA\u9519:", modalError);
+      } finally {
+        this.recordingModal = null;
+      }
+    } else {
+      this.recordingModal = null;
+    }
   }
   handleRecordingCancel() {
+    if (this.isProcessingCancelled) {
+      console.log("\u53D6\u6D88\u5DF2\u5904\u7406\uFF0C\u5FFD\u7565\u91CD\u590D\u8C03\u7528");
+      return;
+    }
     console.log("\u7528\u6237\u53D6\u6D88\u4E86\u5F55\u97F3");
     this.isProcessingCancelled = true;
     new import_obsidian4.Notice("\u5F55\u97F3\u5DF2\u53D6\u6D88");
+    if (this.recordingModal) {
+      this.recordingModal = null;
+    }
   }
 };

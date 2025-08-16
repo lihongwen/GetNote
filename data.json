@@ -13,5 +13,6 @@
   "textModel": "qwen-plus-latest",
   "processOriginalText": true,
   "generateTags": true,
-  "maxRetries": 2
+  "maxRetries": 2,
+  "keepOriginalAudio": true
 }

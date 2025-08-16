@@ -70,11 +70,12 @@ export class NoteGenerator {
         yaml.push('---');
         
         // 基本信息
-        yaml.push(`created: ${metadata.timestamp.toISOString()}`);
-        yaml.push(`title: "${this.formatSmartTitle(enhancedResult.smartTitle, metadata.timestamp)}"`);
+        yaml.push(`created: ${this.formatObsidianDate(metadata.timestamp)}`);
+        yaml.push(`title: "${this.escapeYamlValue(this.formatSmartTitle(enhancedResult.smartTitle, metadata.timestamp))}"`);
+        yaml.push(`note_type: "voice_note"`);
         
         if (metadata.duration) {
-            yaml.push(`duration: "${metadata.duration}"`);
+            yaml.push(`duration: "${this.escapeYamlValue(metadata.duration)}"`);
         }
         
         // 结构化标签
@@ -87,8 +88,8 @@ export class NoteGenerator {
         }
         
         // AI处理信息
-        yaml.push(`processed: ${enhancedResult.isProcessed}`);
-        yaml.push(`model: "${metadata.model}"`);
+        yaml.push(`ai_processed: ${enhancedResult.isProcessed}`);
+        yaml.push(`speech_model: "${metadata.model}"`);
         
         if (metadata.textModel && enhancedResult.isProcessed) {
             yaml.push(`text_model: "${metadata.textModel}"`);
@@ -101,8 +102,7 @@ export class NoteGenerator {
         
         // 概要信息
         if (enhancedResult.summary && enhancedResult.summary !== enhancedResult.originalText) {
-            const escapedSummary = enhancedResult.summary.replace(/"/g, '\\"');
-            yaml.push(`summary: "${escapedSummary}"`);
+            yaml.push(`summary: "${this.escapeYamlValue(enhancedResult.summary)}"`);
         }
         
         yaml.push('---');
@@ -119,33 +119,71 @@ export class NoteGenerator {
         
         // 人物标签
         structuredTags.people.forEach(person => {
-            tags.push(`人物/${person}`);
+            tags.push(`人物-${this.normalizeTagName(person)}`);
         });
         
         // 事件标签
         structuredTags.events.forEach(event => {
-            tags.push(`事件/${event}`);
+            tags.push(`事件-${this.normalizeTagName(event)}`);
         });
         
         // 主题标签
         structuredTags.topics.forEach(topic => {
-            tags.push(`主题/${topic}`);
+            tags.push(`主题-${this.normalizeTagName(topic)}`);
         });
         
         // 时间标签
         structuredTags.times.forEach(time => {
-            tags.push(`时间/${time}`);
+            tags.push(`时间-${this.normalizeTagName(time)}`);
         });
         
         // 地点标签
         structuredTags.locations.forEach(location => {
-            tags.push(`地点/${location}`);
+            tags.push(`地点-${this.normalizeTagName(location)}`);
         });
         
         // 默认标签
         tags.push('语音笔记');
         
         return tags;
+    }
+
+    /**
+     * 规范化标签名称，确保Obsidian兼容性
+     */
+    private normalizeTagName(tagName: string): string {
+        return tagName
+            .trim()
+            .replace(/\s+/g, '-')        // 空格替换为连字符
+            .replace(/[\/\\]/g, '-')     // 斜杠替换为连字符
+            .replace(/[^\w\u4e00-\u9fa5-]/g, '') // 只保留字母、数字、中文和连字符
+            .replace(/-+/g, '-')         // 多个连字符合并为一个
+            .replace(/^-|-$/g, '');      // 移除开头和结尾的连字符
+    }
+
+    /**
+     * 转义YAML值，确保兼容性
+     */
+    private escapeYamlValue(value: string): string {
+        return value
+            .replace(/\\/g, '\\\\')      // 转义反斜杠
+            .replace(/"/g, '\\"')        // 转义双引号
+            .replace(/\n/g, '\\n')       // 转义换行符
+            .replace(/\r/g, '\\r')       // 转义回车符
+            .replace(/\t/g, '\\t');      // 转义制表符
+    }
+
+    /**
+     * 格式化Obsidian标准日期格式
+     */
+    private formatObsidianDate(timestamp: Date): string {
+        const year = timestamp.getFullYear();
+        const month = String(timestamp.getMonth() + 1).padStart(2, '0');
+        const day = String(timestamp.getDate()).padStart(2, '0');
+        const hour = String(timestamp.getHours()).padStart(2, '0');
+        const minute = String(timestamp.getMinutes()).padStart(2, '0');
+        
+        return `${year}-${month}-${day} ${hour}:${minute}`;
     }
 
     /**

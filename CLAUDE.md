@@ -76,6 +76,10 @@ npm run build            # Production build (TypeScript check + esbuild producti
 
 # Version management
 npm run version          # Bump version and update manifest.json/versions.json
+
+# Debug and testing
+# No formal test suite - testing done via manual Obsidian plugin loading
+# Debug via Chrome DevTools when plugin is loaded in Obsidian
 ```
 
 ## TypeScript Configuration
@@ -141,18 +145,28 @@ main.ts                  # Plugin entry point, coordinates all modules
 
 ### Key Architectural Patterns
 
-1. **API Client Abstraction**: `DashScopeClient` handles both audio-to-text (qwen-audio-asr-latest) and text processing (qwen-plus-latest) models
-2. **State Management**: Recording modal manages 6 states (idle/recording/paused/transcribing/processing/saving) with cancel confirmation
-3. **Error Handling**: CORS resolved via Obsidian's `requestUrl()` method instead of `fetch()`
-4. **Cancellation Support**: API processing can be cancelled with proper resource cleanup
-5. **Fallback Mechanism**: LLM text processing failures fall back to original transcribed text
+1. **API Client Abstraction**: `DashScopeClient` handles both audio-to-text (qwen-audio-asr-latest) and text processing (qwen-plus-latest) models using dual interface pattern (DashScopeRequest for audio, CompatibleRequest for text)
+2. **State Management**: Recording modal manages 6 states (idle/recording/paused/transcribing/processing/saving) with cancel confirmation using `isProcessingCancelled` flag
+3. **Error Handling**: CORS resolved via Obsidian's `requestUrl()` method instead of `fetch()` - this is critical for API calls
+4. **Cancellation Support**: API processing can be cancelled with proper resource cleanup through main plugin's `handleRecordingCancel()` method
+5. **Fallback Mechanism**: LLM text processing failures fall back to original transcribed text via `EnhancedProcessingResult.isProcessed` flag
+6. **Async Pipeline**: Three-stage processing (transcribe → enhance → save) with cancellation checks between each stage
 
 ### Data Flow
 
-1. **Recording**: `AudioRecorder` → MediaRecorder blob → base64 encoding
-2. **API Processing**: Base64 audio → DashScope API → transcribed text 
-3. **Text Enhancement**: Raw text → TextProcessor (optional) → optimized text + tags
-4. **Note Creation**: `NoteGenerator` → structured markdown → vault save
+1. **Recording**: `AudioRecorder` (src/recorder.ts) → MediaRecorder blob → base64 encoding
+2. **API Processing**: Base64 audio → DashScope API (via requestUrl) → transcribed text 
+3. **Text Enhancement**: Raw text → TextProcessor (optional) → `EnhancedProcessingResult` with tags + summary
+4. **Note Creation**: `NoteGenerator.generateEnhancedNoteContent()` → structured markdown → vault save
+5. **Cancellation**: `isProcessingCancelled` flag checked between each stage for clean abort
+
+### Critical Implementation Details
+
+- **CORS Workaround**: All API calls MUST use `requestUrl()` from Obsidian API, never `fetch()`
+- **API Interfaces**: Two different request formats - `DashScopeRequest` for audio, `CompatibleRequest` for text
+- **Settings Integration**: Plugin settings stored in `data.json`, loaded via `loadData()`/`saveData()`
+- **Error Recovery**: TextProcessor failures gracefully fall back to raw transcription
+- **Resource Management**: Audio files optionally saved alongside notes when `keepOriginalAudio` enabled
 
 ## UI Design Features
 
@@ -251,10 +265,12 @@ main.ts                  # Plugin entry point, coordinates all modules
 ### Common Issues and Solutions
 
 1. **CORS Errors**: Always use `requestUrl()` instead of `fetch()` for API calls
-2. **API Format**: Ensure request includes `input` wrapper around `messages` array
+2. **API Format**: Ensure request includes `input` wrapper around `messages` array for audio API
 3. **TypeScript Errors**: Update tsconfig.json target to ES2017 for modern methods
-4. **Audio Permission**: Handle microphone permission requests gracefully
-5. **File Saving**: Use Obsidian's vault API for proper file creation
+4. **Audio Permission**: Handle microphone permission requests gracefully via `AudioRecorder.isSupported()`
+5. **File Saving**: Use Obsidian's vault API for proper file creation via `app.vault.create()`
+6. **Build Issues**: esbuild config excludes Obsidian APIs - they're provided at runtime
+7. **Plugin Loading**: Manual installation to `.obsidian/plugins/getnote-plugin/` directory required for testing
 
 ## Official Resources
 
