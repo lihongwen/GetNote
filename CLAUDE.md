@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an Obsidian plugin project named "getnote-plugin" that converts voice input into transcribed text using AI. The plugin uses Alibaba Cloud's DashScope API with the qwen-audio-asr-latest model for accurate audio-to-text transcription.
+This is an Obsidian plugin project named "getnote-plugin" that creates rich multimodal notes by combining voice recordings and image uploads with AI processing. The plugin uses Alibaba Cloud's DashScope API with multiple models: qwen-audio-asr-latest for audio transcription, qwen-vl-ocr-latest for image OCR, and qwen-plus-latest for content analysis and enhancement.
 
-### Current Status (Phase 6 Complete - Cancel Confirmation ✅)
+### Current Status (Phase 7 Complete - Image OCR Functionality ✅)
 - ✅ Basic plugin structure implemented
 - ✅ Audio recording functionality using Web Audio API
 - ✅ DashScope API integration with proper authentication
@@ -19,7 +19,7 @@ This is an Obsidian plugin project named "getnote-plugin" that converts voice in
 - ✅ Complete recording UI with start/pause/stop controls
 - ✅ Modern, beautiful interface design with animations
 - ✅ Real-time recording status and time display
-- ✅ Simplified three-button UI design (极简三按钮界面)
+- ✅ Simplified four-button UI design (Start/Pause/Stop/Cancel)
 - ✅ Semantic color scheme with intuitive button meanings
 - ✅ Streamlined state management (idle/recording/paused)
 - ✅ Enhanced user experience with minimal cognitive load
@@ -31,15 +31,30 @@ This is an Obsidian plugin project named "getnote-plugin" that converts voice in
 - ✅ Enhanced recording states (transcribing/processing/saving)
 - ✅ Fallback mechanism for LLM processing failures
 - ✅ Optional LLM processing with settings toggle
-- ✅ **NEW**: Smart cancel confirmation system
-- ✅ **NEW**: Close dialog with state-aware confirmation messages
-- ✅ **NEW**: Cancel button in recording interface
-- ✅ **NEW**: API processing cancellation mechanism
-- ✅ **NEW**: Graceful resource cleanup on cancel
+- ✅ Smart cancel confirmation system
+- ✅ Close dialog with state-aware confirmation messages
+- ✅ Cancel button in recording interface
+- ✅ API processing cancellation mechanism
+- ✅ Graceful resource cleanup on cancel
+- ✅ **Phase 6 Complete**: Note style modification features
+- ✅ **Phase 6 Complete**: Recording cancellation bug fixes
+- ✅ **Phase 6 Complete**: Stack overflow error resolution
+- ✅ **Phase 7 Complete**: Complete multimodal image OCR functionality
+  - ✅ Image upload with drag-and-drop support
+  - ✅ Thumbnail generation and preview
+  - ✅ OCR processing using qwen-vl-ocr-latest model
+  - ✅ Combined audio + image LLM processing
+  - ✅ Comprehensive error handling and validation
+  - ✅ Batch processing with timeout mechanisms
+  - ✅ Recoverable error retry systems
+  - ✅ Image format validation and size limits
+  - ✅ Multimodal note generation with image integration
 
 ### Key Features
 - 🎙️ **Voice Recording**: Uses MediaRecorder API with configurable quality settings
+- 🖼️ **Image OCR**: Upload and process images with qwen-vl-ocr-latest for text recognition
 - 🔗 **AI Integration**: Alibaba Cloud DashScope API with qwen-audio-asr-latest for precise audio-to-text conversion
+- 🎯 **Multimodal Processing**: Combined audio transcription + image OCR with unified LLM analysis
 - 📝 **Text Transcription**: Direct audio-to-text conversion without complex prompting
 - 🤖 **LLM Text Processing**: Optional AI text optimization using qwen-plus-latest model
 - 🏷️ **Auto Tag Generation**: AI-powered content analysis and tag creation
@@ -110,7 +125,7 @@ This plugin integrates with **Alibaba Cloud's DashScope API** using two models:
 ## Project Structure
 
 ```
-├── main.ts              # Plugin main class
+├── main.ts              # Plugin main class with multimodal processing flow
 ├── manifest.json        # Plugin metadata (required)
 ├── package.json         # Dependencies and scripts
 ├── tsconfig.json        # TypeScript configuration
@@ -120,13 +135,15 @@ This plugin integrates with **Alibaba Cloud's DashScope API** using two models:
 ├── CLAUDE.md           # Development guidance for Claude Code
 ├── data.json           # Plugin settings storage
 ├── src/
-│   ├── api-client.ts    # DashScope API integration (speech + text models)
+│   ├── api-client.ts    # DashScope API integration (speech + OCR + text models)
 │   ├── recorder.ts      # Audio recording functionality (with pause/resume)
-│   ├── note-generator.ts # Note creation and formatting (with AI enhancements)
-│   ├── settings.ts      # Plugin settings UI (dual API testing)
-│   ├── recording-modal.ts # Recording control UI interface (processing states)
-│   └── text-processor.ts # LLM text processing and optimization
-└── styles.css          # Modern UI styles with animations
+│   ├── image-manager.ts # Image upload, validation, and thumbnail generation
+│   ├── note-generator.ts # Multimodal note creation and vault management
+│   ├── settings.ts      # Plugin settings UI (speech + OCR + text testing)
+│   ├── recording-modal.ts # Recording control UI with image upload area
+│   ├── text-processor.ts # Multimodal LLM processing and optimization
+│   └── types.ts         # TypeScript interfaces for multimodal content
+└── styles.css          # Complete UI styles including image components
 ```
 
 ## Core Architecture
@@ -134,31 +151,34 @@ This plugin integrates with **Alibaba Cloud's DashScope API** using two models:
 The plugin follows a **modular architecture** with clear separation of concerns:
 
 ```
-main.ts                  # Plugin entry point, coordinates all modules
-├── src/api-client.ts    # DashScope API integration (audio + text models)  
+main.ts                  # Plugin entry point, coordinates multimodal processing
+├── src/api-client.ts    # DashScope API integration (audio + OCR + text models)  
 ├── src/recorder.ts      # Web Audio API recording functionality
-├── src/recording-modal.ts # UI modal with 4-button interface (Start/Pause/Stop/Cancel)
-├── src/note-generator.ts # Markdown note creation and vault management
-├── src/text-processor.ts # LLM text optimization and tag generation
-└── src/settings.ts      # Plugin configuration UI and validation
+├── src/image-manager.ts # Image upload, validation, thumbnail generation, error handling
+├── src/recording-modal.ts # UI modal with audio recording + image upload areas
+├── src/note-generator.ts # Multimodal note creation with audio + image + OCR sections
+├── src/text-processor.ts # Multimodal LLM processing (audio + OCR combined analysis)
+├── src/types.ts         # TypeScript interfaces for multimodal content and processing
+└── src/settings.ts      # Plugin configuration UI with OCR settings and testing
 ```
 
 ### Key Architectural Patterns
 
-1. **API Client Abstraction**: `DashScopeClient` handles both audio-to-text (qwen-audio-asr-latest) and text processing (qwen-plus-latest) models using dual interface pattern (DashScopeRequest for audio, CompatibleRequest for text)
-2. **State Management**: Recording modal manages 6 states (idle/recording/paused/transcribing/processing/saving) with cancel confirmation using `isProcessingCancelled` flag
-3. **Error Handling**: CORS resolved via Obsidian's `requestUrl()` method instead of `fetch()` - this is critical for API calls
-4. **Cancellation Support**: API processing can be cancelled with proper resource cleanup through main plugin's `handleRecordingCancel()` method
-5. **Fallback Mechanism**: LLM text processing failures fall back to original transcribed text via `EnhancedProcessingResult.isProcessed` flag
-6. **Async Pipeline**: Three-stage processing (transcribe → enhance → save) with cancellation checks between each stage
+1. **Multimodal API Integration**: `DashScopeClient` handles three models - `qwen-audio-asr-latest` for speech, `qwen-vl-ocr-latest` for OCR, and `qwen-plus-latest` for text processing
+2. **State Management**: Recording modal manages 7 states (idle/recording/paused/transcribing/ocr-processing/processing/saving) with intelligent cancellation
+3. **Error Handling**: Comprehensive validation, timeout handling, and recovery mechanisms with user-friendly error messages
+4. **Image Management**: `ImageManager` provides validation, thumbnail generation, batch processing, and error recovery with detailed reporting
+5. **Multimodal Processing**: `TextProcessor` combines audio transcription + OCR text for unified LLM analysis and enhancement
+6. **Async Pipeline**: Five-stage processing (audio transcription → image OCR → combined LLM analysis → file saving → note generation)
 
-### Data Flow
+### Multimodal Data Flow
 
-1. **Recording**: `AudioRecorder` (src/recorder.ts) → MediaRecorder blob → base64 encoding
-2. **API Processing**: Base64 audio → DashScope API (via requestUrl) → transcribed text 
-3. **Text Enhancement**: Raw text → TextProcessor (optional) → `EnhancedProcessingResult` with tags + summary
-4. **Note Creation**: `NoteGenerator.generateEnhancedNoteContent()` → structured markdown → vault save
-5. **Cancellation**: `isProcessingCancelled` flag checked between each stage for clean abort
+1. **Audio Recording**: `AudioRecorder` → MediaRecorder blob → base64 encoding → `qwen-audio-asr-latest`
+2. **Image Processing**: `ImageManager` → file validation → thumbnail generation → base64 encoding → `qwen-vl-ocr-latest`
+3. **Content Combination**: Audio text + OCR text → structured multimodal content object
+4. **LLM Enhancement**: Combined content → `qwen-plus-latest` → enhanced text + tags + summary + smart title
+5. **Vault Integration**: Images saved to vault → relative paths → multimodal note generation → structured markdown
+6. **Cancellation**: `isProcessingCancelled` flag with cleanup at each stage
 
 ### Critical Implementation Details
 
@@ -248,19 +268,32 @@ main.ts                  # Plugin entry point, coordinates all modules
 - [x] Fallback mechanism reliability
 - [x] Settings UI and configuration
 
-### Phase 6 Testing (Completed ✅) - Cancel Confirmation
+### Phase 6 Testing (Completed ✅) - Cancel Confirmation & Style Improvements
 - [x] Close button confirmation dialog
 - [x] Cancel button functionality
 - [x] State-aware confirmation messages
 - [x] API cancellation mechanism
 - [x] Resource cleanup verification
+- [x] Note style modification features implementation
+- [x] Recording cancellation infinite loop bug fix
+- [x] Stack overflow error resolution in cancel functionality
+
+### Phase 7 Testing (In Progress 🚧) - Image Support
+Current development branch: `添加图片功能`
+- [ ] Image attachment functionality
+- [ ] Image processing integration with AI models
+- [ ] Visual content analysis features
+- [ ] Enhanced note templates with image support
+- [ ] UI improvements for image handling
 
 ### Future Enhancement Ideas
-- [ ] Advanced note templates
+- [ ] Advanced note templates with multimedia support
 - [ ] Batch audio processing
 - [ ] Export/import settings functionality
 - [ ] Performance optimization for long recordings
 - [ ] Plugin marketplace submission
+- [ ] Image-to-text OCR integration
+- [ ] Voice + visual multimodal AI processing
 
 ### Common Issues and Solutions
 
@@ -294,3 +327,14 @@ main.ts                  # Plugin entry point, coordinates all modules
 2. **Audio Processing**: 10MB limit, Base64 encoding required for API transmission  
 3. **State Management**: 6 processing states require careful coordination for cancel operations
 4. **LLM Fallback**: Text processing failures must gracefully fall back to raw transcription
+
+### Git Branch Strategy
+- **main**: Stable production code with completed features
+- **添加图片功能**: Current development branch for image functionality features
+- Recent completed work: Note style modification, recording cancellation fixes, UI improvements
+
+### Development Workflow
+1. Features developed in feature branches (like `添加图片功能`)
+2. Testing completed within feature branches before main merge
+3. Each phase represents a major feature milestone
+4. Commit messages use conventional format with emoji prefixes

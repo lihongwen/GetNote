@@ -1,5 +1,7 @@
 // 文本处理器 - 负责LLM文本优化和标签生成
-import { DashScopeClient, TextProcessingResult } from './api-client';
+import { DashScopeClient, TextProcessingResult, OCRResult } from './api-client';
+import { ImageItem } from './image-manager';
+import { MultimodalContent } from './types';
 
 export interface TextProcessorSettings {
     enableLLMProcessing: boolean;
@@ -25,6 +27,31 @@ export interface StructuredTags {
     topics: string[];     // 主题
     times: string[];      // 时间
     locations: string[];  // 地点
+}
+
+// 多模态处理结果接口
+export interface MultimodalProcessingResult {
+    audioText: string; // 音频转录文本
+    ocrText: string; // OCR识别文本
+    combinedText: string; // 合并后的文本
+    processedText: string; // LLM处理后的文本
+    summary: string; // 内容摘要
+    tags: string[]; // 生成的标签
+    structuredTags: StructuredTags; // 结构化标签
+    smartTitle: string; // 智能标题
+    isProcessed: boolean; // 是否成功处理
+    audioOnly: boolean; // 是否仅包含音频
+    imageOnly: boolean; // 是否仅包含图片
+    multimodal: boolean; // 是否为多模态内容
+    processingTime?: string; // 处理时长
+}
+
+// OCR文本项接口
+export interface OCRTextItem {
+    imageId: string;
+    fileName: string;
+    text: string;
+    confidence?: number;
 }
 
 export const DEFAULT_TEXT_PROCESSOR_SETTINGS: TextProcessorSettings = {
@@ -387,6 +414,310 @@ ${text}`;
      */
     private delay(ms: number): Promise<void> {
         return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    /**
+     * 处理多模态内容 - 新的主要入口点
+     * @param multimodalContent 包含音频和图片信息的多模态内容
+     * @returns 多模态处理结果
+     */
+    async processMultimodalContent(multimodalContent: MultimodalContent): Promise<MultimodalProcessingResult> {
+        const startTime = Date.now();
+        
+        // 提取音频和OCR文本
+        const audioText = multimodalContent.audio?.transcribedText || '';
+        const ocrText = multimodalContent.images?.totalOCRText || '';
+        const combinedText = multimodalContent.combinedText || this.combineAudioAndOCRText(audioText, ocrText);
+        
+        // 判断内容类型
+        const audioOnly = !!audioText && !ocrText;
+        const imageOnly = !audioText && !!ocrText;
+        const multimodal = !!audioText && !!ocrText;
+        
+        // 如果未启用LLM处理，直接返回原始内容
+        if (!this.settings.enableLLMProcessing) {
+            return {
+                audioText,
+                ocrText,
+                combinedText,
+                processedText: combinedText,
+                summary: combinedText,
+                tags: [],
+                structuredTags: { people: [], events: [], topics: [], times: [], locations: [] },
+                smartTitle: this.generateBasicTitle(combinedText),
+                isProcessed: false,
+                audioOnly,
+                imageOnly,
+                multimodal,
+                processingTime: `${Date.now() - startTime}ms`
+            };
+        }
+
+        try {
+            console.log('开始多模态内容处理...');
+            
+            // 选择处理策略
+            let processedText: string;
+            let tags: string[];
+            let structuredTags: StructuredTags;
+            let summary: string;
+            let smartTitle: string;
+            
+            if (multimodal) {
+                // 多模态内容：使用组合文本进行处理
+                const [basicResult, structuredTagsResult, summaryResult, titleResult] = await Promise.all([
+                    this.processMultimodalTextWithLLM(audioText, ocrText, combinedText),
+                    this.generateStructuredTags(combinedText),
+                    this.generateContentSummary(combinedText),
+                    this.generateSmartTitle(combinedText)
+                ]);
+                
+                processedText = basicResult.processedText;
+                tags = basicResult.tags;
+                structuredTags = structuredTagsResult;
+                summary = summaryResult;
+                smartTitle = titleResult;
+            } else {
+                // 单模态内容：使用现有方法处理
+                const textToProcess = audioText || ocrText;
+                const [basicResult, structuredTagsResult, summaryResult, titleResult] = await Promise.all([
+                    this.processWithRetry(textToProcess),
+                    this.generateStructuredTags(textToProcess),
+                    this.generateContentSummary(textToProcess),
+                    this.generateSmartTitle(textToProcess)
+                ]);
+                
+                processedText = basicResult.processedText;
+                tags = basicResult.tags;
+                structuredTags = structuredTagsResult;
+                summary = summaryResult;
+                smartTitle = titleResult;
+            }
+            
+            return {
+                audioText,
+                ocrText,
+                combinedText,
+                processedText,
+                summary,
+                tags,
+                structuredTags,
+                smartTitle,
+                isProcessed: true,
+                audioOnly,
+                imageOnly,
+                multimodal,
+                processingTime: `${Date.now() - startTime}ms`
+            };
+
+        } catch (error) {
+            console.error('多模态内容处理失败:', error);
+            
+            // 降级处理：尝试基础处理
+            try {
+                const basicResult = await this.processWithRetry(combinedText);
+                return {
+                    audioText,
+                    ocrText,
+                    combinedText,
+                    processedText: basicResult.processedText,
+                    summary: combinedText.length > 200 ? combinedText.substring(0, 200) + '...' : combinedText,
+                    tags: basicResult.tags,
+                    structuredTags: { people: [], events: [], topics: [], times: [], locations: [] },
+                    smartTitle: this.generateBasicTitle(combinedText),
+                    isProcessed: true,
+                    audioOnly,
+                    imageOnly,
+                    multimodal,
+                    processingTime: `${Date.now() - startTime}ms`
+                };
+            } catch (basicError) {
+                console.error('基础处理也失败，返回原始内容:', basicError);
+                return {
+                    audioText,
+                    ocrText,
+                    combinedText,
+                    processedText: combinedText,
+                    summary: combinedText,
+                    tags: [],
+                    structuredTags: { people: [], events: [], topics: [], times: [], locations: [] },
+                    smartTitle: this.generateBasicTitle(combinedText),
+                    isProcessed: false,
+                    audioOnly,
+                    imageOnly,
+                    multimodal,
+                    processingTime: `${Date.now() - startTime}ms`
+                };
+            }
+        }
+    }
+
+    /**
+     * 多模态文本LLM处理
+     */
+    private async processMultimodalTextWithLLM(
+        audioText: string, 
+        ocrText: string, 
+        combinedText: string
+    ): Promise<TextProcessingResult> {
+        const prompt = `请处理以下多模态内容，包含语音转录文字和图片OCR识别文字：
+
+语音转录内容：
+${audioText}
+
+图片OCR识别内容：
+${ocrText}
+
+请按以下要求处理：
+1. 整合语音和图片信息，生成连贯的文字内容
+2. 修正语音转录中的语法错误和口语化表达
+3. 结合图片文字信息，补充和完善内容描述
+4. 生成相关的主题标签（用逗号分隔）
+5. 保持原意不变，语言自然流畅
+
+直接返回处理后的文字内容，然后换行返回标签（格式：标签：tag1,tag2,tag3）`;
+
+        return await this.client.processTextWithLLM(prompt, this.settings.textModel);
+    }
+
+    /**
+     * 合并音频和OCR文字
+     */
+    private combineAudioAndOCRText(audioText: string, ocrText: string): string {
+        const parts = [];
+        
+        if (audioText && audioText.trim()) {
+            parts.push('【语音内容】\n' + audioText.trim());
+        }
+        
+        if (ocrText && ocrText.trim()) {
+            parts.push('【图片文字】\n' + ocrText.trim());
+        }
+        
+        return parts.join('\n\n');
+    }
+
+    /**
+     * 处理OCR文本项列表
+     */
+    async processOCRTextItems(ocrItems: OCRTextItem[]): Promise<{
+        combinedText: string;
+        processedText: string;
+        tags: string[];
+        isProcessed: boolean;
+    }> {
+        if (!ocrItems || ocrItems.length === 0) {
+            return {
+                combinedText: '',
+                processedText: '',
+                tags: [],
+                isProcessed: false
+            };
+        }
+
+        // 合并所有OCR文本
+        const combinedOCRText = ocrItems
+            .map(item => `【${item.fileName}】\n${item.text}`)
+            .join('\n\n');
+
+        // 如果未启用LLM处理，直接返回合并文本
+        if (!this.settings.enableLLMProcessing) {
+            return {
+                combinedText: combinedOCRText,
+                processedText: combinedOCRText,
+                tags: [],
+                isProcessed: false
+            };
+        }
+
+        try {
+            const result = await this.processWithRetry(combinedOCRText);
+            return {
+                combinedText: combinedOCRText,
+                processedText: result.processedText,
+                tags: result.tags,
+                isProcessed: true
+            };
+        } catch (error) {
+            console.error('OCR文本处理失败:', error);
+            return {
+                combinedText: combinedOCRText,
+                processedText: combinedOCRText,
+                tags: [],
+                isProcessed: false
+            };
+        }
+    }
+
+    /**
+     * 验证多模态内容
+     */
+    validateMultimodalContent(content: MultimodalContent): { 
+        valid: boolean; 
+        reason?: string 
+    } {
+        // 检查是否有任何内容
+        const hasAudio = content.audio?.transcribedText && content.audio.transcribedText.trim().length > 0;
+        const hasImages = content.images?.totalOCRText && content.images.totalOCRText.trim().length > 0;
+        
+        if (!hasAudio && !hasImages) {
+            return { valid: false, reason: '没有音频或图片内容' };
+        }
+
+        // 检查合并文本长度
+        const combinedLength = content.combinedText.length;
+        if (combinedLength < 10) {
+            return { valid: false, reason: '内容过短，不需要处理' };
+        }
+
+        if (combinedLength > 15000) {
+            return { valid: false, reason: '内容过长，超出处理限制' };
+        }
+
+        return { valid: true };
+    }
+
+    /**
+     * 生成多模态处理摘要
+     */
+    generateMultimodalProcessingSummary(result: MultimodalProcessingResult): string {
+        const lines = [];
+        
+        // 内容类型
+        if (result.multimodal) {
+            lines.push('🎯 多模态内容 (音频 + 图片)');
+        } else if (result.audioOnly) {
+            lines.push('🎙️ 纯音频内容');
+        } else if (result.imageOnly) {
+            lines.push('🖼️ 纯图片内容');
+        }
+        
+        // 处理状态
+        if (result.isProcessed) {
+            lines.push('✅ 内容已通过AI处理优化');
+            
+            // 内容统计
+            if (result.audioText) {
+                lines.push(`📊 音频文字: ${result.audioText.length}字符`);
+            }
+            if (result.ocrText) {
+                lines.push(`📊 图片文字: ${result.ocrText.length}字符`);
+            }
+            lines.push(`📊 处理后长度: ${result.processedText.length}字符`);
+            
+            if (result.tags.length > 0) {
+                lines.push(`🏷️ 生成标签: ${result.tags.length}个`);
+            }
+        } else {
+            lines.push('📝 使用原始内容');
+        }
+        
+        // 处理时间
+        if (result.processingTime) {
+            lines.push(`⏱️ 处理时间: ${result.processingTime}`);
+        }
+        
+        return lines.join('\n');
     }
 
     /**

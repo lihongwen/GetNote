@@ -1,10 +1,12 @@
 import { Notice, Plugin, TFile } from 'obsidian';
 import { AudioRecorder } from './src/recorder';
-import { DashScopeClient } from './src/api-client';
+import { DashScopeClient, OCRResult } from './src/api-client';
 import { NoteGenerator, NoteMetadata, ProcessedContent } from './src/note-generator';
 import { GetNoteSettings, DEFAULT_SETTINGS, GetNoteSettingTab } from './src/settings';
 import { RecordingModal } from './src/recording-modal';
-import { TextProcessor } from './src/text-processor';
+import { TextProcessor, MultimodalProcessingResult } from './src/text-processor';
+import { ImageManager, ImageItem } from './src/image-manager';
+import { MultimodalContent, MultimodalMetadata } from './src/types';
 
 export default class GetNotePlugin extends Plugin {
 	settings: GetNoteSettings;
@@ -97,16 +99,17 @@ export default class GetNotePlugin extends Plugin {
 		// 创建并打开录音Modal
 		this.recordingModal = new RecordingModal(
 			this.app,
-			(audioBlob) => this.handleAudioData(audioBlob),
+			(audioBlob, images) => this.handleMultimodalData(audioBlob, images),
 			(error) => this.handleRecordingError(error),
 			this.settings.enableLLMProcessing,
+			this.settings.enableImageOCR,
 			() => this.handleRecordingCancel()
 		);
 		
 		this.recordingModal.open();
 	}
 
-	private async handleAudioData(audioBlob: Blob) {
+	private async handleMultimodalData(audioBlob: Blob, images?: ImageItem[]) {
 		const processingStartTime = Date.now();
 		
 		// 重置取消状态
@@ -124,9 +127,16 @@ export default class GetNotePlugin extends Plugin {
 				return;
 			}
 
+			// 判断内容类型
+			const hasAudio = audioBlob.size > 0;
+			const hasImages = images && images.length > 0;
+			const isMultimodal = hasAudio && hasImages;
+
+			console.log(`开始多模态处理 - 音频: ${hasAudio}, 图片: ${hasImages ? images.length : 0}张, 多模态: ${isMultimodal}`);
+
 			// 阶段0：保存音频文件（如果启用）
-			let audioMetadata: { audioFileName?: string; audioFilePath?: string } = {};
-			if (this.settings.keepOriginalAudio) {
+			let audioMetadata: { audioFileName?: string; audioFilePath?: string; audioBlob?: Blob } = {};
+			if (this.settings.keepOriginalAudio && hasAudio) {
 				try {
 					// 更新界面状态
 					if (this.recordingModal) {
@@ -136,7 +146,7 @@ export default class GetNotePlugin extends Plugin {
 					new Notice('正在保存音频文件...');
 					console.log('开始保存音频文件');
 					
-					const tempFileName = this.noteGenerator.generateFileName('语音转录', new Date());
+					const tempFileName = this.noteGenerator.generateFileName('多模态笔记', new Date());
 					const audioResult = await this.noteGenerator.saveAudioFile(
 						audioBlob,
 						this.settings.outputFolder,
@@ -145,14 +155,14 @@ export default class GetNotePlugin extends Plugin {
 					
 					audioMetadata = {
 						audioFileName: audioResult.audioFile.name,
-						audioFilePath: audioResult.audioFilePath
+						audioFilePath: audioResult.audioFilePath,
+						audioBlob: audioBlob
 					};
 					
 					console.log('音频文件保存完成:', audioResult.audioFilePath);
 				} catch (audioSaveError) {
 					console.error('保存音频文件失败:', audioSaveError);
-					new Notice('保存音频文件失败，但会继续进行文字转录');
-					// 音频保存失败不应阻止转录过程
+					new Notice('保存音频文件失败，但会继续进行处理');
 				}
 				
 				// 检查音频保存后是否被取消
@@ -163,58 +173,162 @@ export default class GetNotePlugin extends Plugin {
 			}
 
 			// 阶段1：语音转文字
-			if (this.recordingModal) {
-				this.recordingModal.updateProcessingState('transcribing');
-			}
-			
-			new Notice('正在调用AI转录音频...');
-			console.log('开始语音转录处理');
+			let transcribedText = '';
+			if (hasAudio) {
+				if (this.recordingModal) {
+					this.recordingModal.updateProcessingState('transcribing');
+				}
+				
+				new Notice('正在调用AI转录音频...');
+				console.log('开始语音转录处理');
 
-			const transcribedText = await this.dashScopeClient.processAudio(audioBlob);
-			
-			// 检查是否被取消
-			if (this.isProcessingCancelled) {
-				console.log('语音转录已被用户取消');
-				return;
+				transcribedText = await this.dashScopeClient.processAudio(audioBlob);
+				
+				// 检查是否被取消
+				if (this.isProcessingCancelled) {
+					console.log('语音转录已被用户取消');
+					return;
+				}
+				
+				console.log('语音转录完成，文本长度:', transcribedText.length);
 			}
-			
-			console.log('语音转录完成，文本长度:', transcribedText.length);
 
-			// 阶段2：AI增强文本处理（如果启用）
-			let enhancedContent: import('./src/text-processor').EnhancedProcessingResult;
+			// 阶段2：OCR图片识别
+			let ocrResults: Map<string, OCRResult> = new Map();
+			let totalOCRText = '';
+			if (hasImages && this.settings.enableImageOCR) {
+				if (this.recordingModal) {
+					this.recordingModal.updateProcessingState('ocr-processing');
+				}
+				
+				new Notice(`正在识别${images.length}张图片中的文字...`);
+				console.log(`开始OCR处理，共${images.length}张图片`);
+
+				// 并行处理所有图片OCR
+				const ocrPromises = images.map(async (image) => {
+					try {
+						// 将DataURL转换为base64
+						const base64Data = image.originalDataUrl.split(',')[1];
+						const result = await this.dashScopeClient.processImageOCR(base64Data, image.fileType);
+						ocrResults.set(image.id, result);
+						console.log(`图片${image.fileName}OCR完成，识别文字长度:`, result.text.length);
+						return { imageId: image.id, result };
+					} catch (error) {
+						console.error(`图片${image.fileName}OCR失败:`, error);
+						return { imageId: image.id, error };
+					}
+				});
+
+				await Promise.all(ocrPromises);
+				
+				// 检查是否被取消
+				if (this.isProcessingCancelled) {
+					console.log('OCR处理已被用户取消');
+					return;
+				}
+
+				// 合并所有OCR文本
+				totalOCRText = Array.from(ocrResults.values())
+					.map(result => result.text)
+					.filter(text => text.trim().length > 0)
+					.join('\n\n');
+				
+				console.log('OCR处理完成，总文字长度:', totalOCRText.length);
+			}
+
+			// 构建多模态内容
+			const multimodalContent: MultimodalContent = {
+				audio: hasAudio ? {
+					transcribedText: transcribedText,
+					duration: '录音时长', // Modal中管理
+					audioFileName: audioMetadata.audioFileName,
+					audioFilePath: audioMetadata.audioFilePath,
+					audioBlob: audioMetadata.audioBlob
+				} : undefined,
+				images: hasImages ? {
+					items: images,
+					ocrResults: ocrResults,
+					totalOCRText: totalOCRText
+				} : undefined,
+				combinedText: this.combineAudioAndOCRText(transcribedText, totalOCRText),
+				metadata: {
+					hasAudio: hasAudio,
+					hasImages: hasImages,
+					audioCount: hasAudio ? 1 : 0,
+					imageCount: hasImages ? images.length : 0,
+					totalProcessingTime: '',
+					models: {
+						speechModel: hasAudio ? this.settings.modelName : undefined,
+						ocrModel: hasImages && this.settings.enableImageOCR ? this.settings.ocrModel : undefined,
+						textModel: this.settings.enableLLMProcessing ? this.settings.textModel : undefined
+					},
+					createdAt: new Date()
+				}
+			};
+
+			// 阶段3：多模态AI处理（如果启用）
+			let multimodalResult: MultimodalProcessingResult;
 			
-			if (this.settings.enableLLMProcessing && this.textProcessor) {
+			if ((this.settings.enableLLMProcessing || (hasImages && this.settings.combineAudioAndOCR)) && this.textProcessor) {
 				// 更新界面状态
 				if (this.recordingModal) {
 					this.recordingModal.updateProcessingState('processing');
 				}
 				
-				new Notice('正在使用AI增强处理文本...');
-				console.log('开始AI增强文本处理');
+				new Notice('正在使用AI处理多模态内容...');
+				console.log('开始多模态AI处理');
 				
-				enhancedContent = await this.textProcessor.processTranscribedTextEnhanced(transcribedText);
+				multimodalResult = await this.textProcessor.processMultimodalContent(multimodalContent);
 				
 				// 检查是否被取消
 				if (this.isProcessingCancelled) {
-					console.log('AI文本处理已被用户取消');
+					console.log('多模态AI处理已被用户取消');
 					return;
 				}
 				
-				console.log('AI增强处理完成，是否已处理:', enhancedContent.isProcessed);
+				console.log('多模态AI处理完成，是否已处理:', multimodalResult.isProcessed);
 			} else {
-				// 不启用AI处理，直接使用原始文本
-				enhancedContent = {
-					originalText: transcribedText,
-					processedText: transcribedText,
+				// 不启用AI处理，构建基础结果
+				multimodalResult = {
+					audioText: transcribedText,
+					ocrText: totalOCRText,
+					combinedText: multimodalContent.combinedText,
+					processedText: multimodalContent.combinedText,
+					summary: multimodalContent.combinedText,
 					tags: [],
 					structuredTags: { people: [], events: [], topics: [], times: [], locations: [] },
-					summary: transcribedText,
-					smartTitle: transcribedText.substring(0, 20) + '...',
-					isProcessed: false
+					smartTitle: this.generateBasicTitle(multimodalContent.combinedText),
+					isProcessed: false,
+					audioOnly: hasAudio && !hasImages,
+					imageOnly: !hasAudio && hasImages,
+					multimodal: isMultimodal
 				};
 			}
 
-			// 阶段3：保存笔记
+			// 阶段4：保存图片到vault（如果有图片）
+			if (hasImages && this.settings.showOriginalImages) {
+				try {
+					new Notice('正在保存图片文件...');
+					console.log('开始保存图片到vault');
+
+					for (const image of images) {
+						const imageResult = await this.noteGenerator.saveImageFile(
+							image,
+							this.settings.outputFolder
+						);
+						// 更新图片的vault路径信息
+						image.vaultPath = imageResult.relativePath;
+						image.vaultFile = imageResult.imageFile;
+					}
+					
+					console.log('图片保存完成');
+				} catch (imageSaveError) {
+					console.error('保存图片失败:', imageSaveError);
+					new Notice('保存图片失败，但会继续生成笔记');
+				}
+			}
+
+			// 阶段5：保存笔记
 			if (this.recordingModal) {
 				this.recordingModal.updateProcessingState('saving');
 			}
@@ -225,59 +339,59 @@ export default class GetNotePlugin extends Plugin {
 				return;
 			}
 			
-			// 计算处理时间
+			// 更新处理时间
 			const processingDuration = Date.now() - processingStartTime;
-
-			// 创建笔记元数据
-			const metadata: NoteMetadata = {
-				title: enhancedContent.smartTitle,
-				timestamp: new Date(),
-				duration: '音频转录', // 由于使用Modal，录音时长在Modal中管理
-				audioSize: this.noteGenerator.formatFileSize(audioBlob.size),
-				processingTime: this.noteGenerator.formatDuration(processingDuration),
-				model: this.settings.modelName,
-				textModel: this.settings.enableLLMProcessing ? this.settings.textModel : undefined,
-				isProcessed: enhancedContent.isProcessed,
-				// 添加音频文件信息
-				audioFileName: audioMetadata.audioFileName,
-				audioFilePath: audioMetadata.audioFilePath
-			};
-
-			// 生成笔记内容（使用新的增强方法）
-			const noteContent = this.noteGenerator.generateEnhancedNoteContent(
-				enhancedContent,
-				metadata
-			);
+			multimodalContent.metadata.totalProcessingTime = this.noteGenerator.formatDuration(processingDuration);
+			multimodalContent.metadata.processedAt = new Date();
 
 			// 保存笔记
 			if (this.settings.autoSave) {
-				const fileName = this.noteGenerator.generateFileName('语音转录', metadata.timestamp);
+				const fileName = this.noteGenerator.generateFileName(
+					isMultimodal ? '多模态笔记' : hasImages ? '图片笔记' : '语音笔记', 
+					multimodalContent.metadata.createdAt
+				);
+				
+				// 使用多模态笔记生成器
+				const noteContent = this.noteGenerator.generateMultimodalNoteContent(
+					multimodalContent,
+					{
+						includeAudioSection: hasAudio,
+						includeOCRSection: hasImages && this.settings.includeOCRInNote,
+						includeImageSection: hasImages && this.settings.showOriginalImages,
+						includeSummarySection: multimodalResult.isProcessed,
+						includeMetadata: this.settings.includeMetadata,
+						audioOptions: {
+							includeOriginalAudio: this.settings.keepOriginalAudio,
+							showTranscription: true
+						},
+						imageOptions: {
+							includeOriginalImages: this.settings.showOriginalImages,
+							showOCRText: this.settings.includeOCRInNote,
+							thumbnailSize: 'medium'
+						},
+						summaryOptions: {
+							generateTags: this.settings.generateTags,
+							generateSummary: true,
+							combineAudioAndOCR: this.settings.combineAudioAndOCR
+						}
+					}
+				);
+
 				const savedFile = await this.noteGenerator.saveNote(
 					noteContent,
 					this.settings.outputFolder,
 					fileName
 				);
 				
-				// 根据处理结果显示不同的完成消息
-				const audioSavedMessage = this.settings.keepOriginalAudio && audioMetadata.audioFileName 
-					? '，原音频已保存' 
-					: '';
-					
-				if (enhancedContent.isProcessed) {
-					const structuredTagsCount = Object.values(enhancedContent.structuredTags)
-						.reduce((count, tagArray) => count + tagArray.length, 0);
-					const totalTags = enhancedContent.tags.length + structuredTagsCount;
-					new Notice(`AI增强处理完成！笔记已保存: ${savedFile.name}，包含${totalTags}个结构化标签${audioSavedMessage}`);
-				} else {
-					new Notice(`转录完成，笔记已保存: ${savedFile.name}${audioSavedMessage}`);
-				}
+				// 根据处理结果显示完成消息
+				const contentSummary = this.generateCompletionMessage(multimodalResult, hasAudio, hasImages, audioMetadata.audioFileName);
+				new Notice(`${contentSummary}笔记已保存: ${savedFile.name}`);
 				
-				console.log('笔记保存完成:', savedFile.path);
+				console.log('多模态笔记保存完成:', savedFile.path);
 			} else {
-				// 如果不自动保存，可以显示预览或提示用户手动保存
-				const message = enhancedContent.isProcessed 
-					? 'AI增强处理完成，请手动保存笔记'
-					: '音频转录完成，请手动保存笔记';
+				const message = multimodalResult.isProcessed 
+					? '多模态AI处理完成，请手动保存笔记'
+					: '多模态内容处理完成，请手动保存笔记';
 				new Notice(message);
 			}
 			
@@ -285,8 +399,8 @@ export default class GetNotePlugin extends Plugin {
 			this.recordingModal = null;
 
 		} catch (error) {
-			console.error('处理音频时出错:', error);
-			new Notice(`处理音频时出错: ${error.message}`);
+			console.error('处理多模态内容时出错:', error);
+			new Notice(`处理多模态内容时出错: ${error.message}`);
 			
 			// 错误恢复：重置所有处理状态
 			this.isProcessingCancelled = true;
@@ -294,11 +408,9 @@ export default class GetNotePlugin extends Plugin {
 			// 安全清理录音Modal引用和状态
 			if (this.recordingModal) {
 				try {
-					// 尝试正常关闭Modal，避免触发无限循环
 					this.recordingModal.close();
 				} catch (modalError) {
 					console.error('错误处理期间关闭Modal失败:', modalError);
-					// 即使关闭失败也要清理引用
 				} finally {
 					this.recordingModal = null;
 				}
@@ -348,5 +460,86 @@ export default class GetNotePlugin extends Plugin {
 		if (this.recordingModal) {
 			this.recordingModal = null;
 		}
+	}
+
+	/**
+	 * 合并音频和OCR文字
+	 */
+	private combineAudioAndOCRText(audioText: string, ocrText: string): string {
+		const parts = [];
+		
+		if (audioText && audioText.trim()) {
+			parts.push('【语音内容】\n' + audioText.trim());
+		}
+		
+		if (ocrText && ocrText.trim()) {
+			parts.push('【图片文字】\n' + ocrText.trim());
+		}
+		
+		return parts.join('\n\n');
+	}
+
+	/**
+	 * 生成完成消息
+	 */
+	private generateCompletionMessage(
+		result: MultimodalProcessingResult, 
+		hasAudio: boolean, 
+		hasImages: boolean, 
+		audioFileName?: string
+	): string {
+		const parts = [];
+		
+		// 内容类型
+		if (result.multimodal) {
+			parts.push('多模态AI处理完成！');
+		} else if (result.audioOnly) {
+			parts.push('语音AI处理完成！');
+		} else if (result.imageOnly) {
+			parts.push('图片OCR处理完成！');
+		}
+		
+		// 处理结果
+		if (result.isProcessed) {
+			const totalTags = result.tags.length + Object.values(result.structuredTags)
+				.reduce((count, tagArray) => count + tagArray.length, 0);
+			if (totalTags > 0) {
+				parts.push(`包含${totalTags}个结构化标签`);
+			}
+		}
+		
+		// 文件保存状态
+		const fileParts = [];
+		if (hasAudio && audioFileName) {
+			fileParts.push('原音频已保存');
+		}
+		if (hasImages) {
+			fileParts.push('图片已保存');
+		}
+		
+		if (fileParts.length > 0) {
+			parts.push(`，${fileParts.join('，')}`);
+		}
+		
+		return parts.join('') + '，';
+	}
+
+	/**
+	 * 生成基础标题
+	 */
+	private generateBasicTitle(text: string): string {
+		if (!text || text.trim().length === 0) {
+			return '多模态笔记';
+		}
+		
+		// 提取文本前几个词作为标题
+		const words = text.trim().split(/\s+/);
+		let title = words.slice(0, 8).join(' ');
+		
+		if (title.length > 30) {
+			title = title.substring(0, 27) + '...';
+		}
+		
+		return title || '多模态笔记';
 	}
 }

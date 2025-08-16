@@ -1,5 +1,8 @@
 import { App, TFile } from 'obsidian';
 import { EnhancedProcessingResult, StructuredTags } from './text-processor';
+import { ImageItem } from './image-manager';
+import { OCRResult } from './api-client';
+import { MultimodalContent, MultimodalNoteContent, NoteGenerationOptions } from './types';
 
 export interface NoteMetadata {
     title: string;
@@ -12,6 +15,13 @@ export interface NoteMetadata {
     isProcessed?: boolean; // 是否经过AI处理
     audioFileName?: string; // 音频文件名
     audioFilePath?: string; // 音频文件相对路径
+    // 图片和OCR相关元数据
+    hasImages?: boolean; // 是否包含图片
+    imageCount?: number; // 图片数量
+    ocrModel?: string; // OCR模型
+    totalOCRText?: string; // 总OCR文字长度描述
+    ocrProcessingTime?: string; // OCR处理时长
+    combinedProcessing?: boolean; // 是否进行了音频+OCR联合处理
 }
 
 export interface ProcessedContent {
@@ -109,6 +119,280 @@ export class NoteGenerator {
         yaml.push('');
         
         return yaml.join('\n');
+    }
+
+    /**
+     * 生成多模态笔记内容（音频+图片+OCR）
+     */
+    generateMultimodalNoteContent(
+        multimodalContent: MultimodalContent,
+        options: NoteGenerationOptions
+    ): string {
+        let content = '';
+
+        // 生成YAML front matter
+        content += this.generateMultimodalYAMLFrontMatter(multimodalContent, options);
+        
+        // 生成标题
+        const title = this.formatMultimodalTitle(multimodalContent);
+        content += `# ${title}\n\n`;
+
+        // 音频部分
+        if (options.includeAudioSection && multimodalContent.audio) {
+            content += this.generateAudioSection(multimodalContent.audio, options.audioOptions);
+        }
+
+        // 图片部分  
+        if (options.includeImageSection && multimodalContent.images && multimodalContent.images.items.length > 0) {
+            content += this.generateImageSection(multimodalContent.images, options.imageOptions);
+        }
+
+        // OCR文字识别部分
+        if (options.includeOCRSection && multimodalContent.images && multimodalContent.images.totalOCRText) {
+            content += this.generateOCRSection(multimodalContent.images, options.imageOptions);
+        }
+
+        // 综合分析部分
+        if (options.includeSummarySection && multimodalContent.combinedText) {
+            content += this.generateSummarySection(multimodalContent.combinedText, options.summaryOptions);
+        }
+
+        // 元数据部分
+        if (options.includeMetadata) {
+            content += this.generateMetadataSection(multimodalContent.metadata);
+        }
+
+        return content;
+    }
+
+    /**
+     * 生成多模态YAML front matter
+     */
+    private generateMultimodalYAMLFrontMatter(
+        content: MultimodalContent,
+        options: NoteGenerationOptions
+    ): string {
+        const yaml = [];
+        yaml.push('---');
+        
+        // 基本信息
+        yaml.push(`created: ${this.formatObsidianDate(content.metadata.createdAt)}`);
+        yaml.push(`title: "${this.escapeYamlValue(content.metadata.hasAudio ? '多模态语音笔记' : '图片笔记')}"`);
+        yaml.push(`note_type: "multimodal_note"`);
+        
+        // 内容类型标记
+        yaml.push(`has_audio: ${content.metadata.hasAudio}`);
+        yaml.push(`has_images: ${content.metadata.hasImages}`);
+        yaml.push(`audio_count: ${content.metadata.audioCount}`);
+        yaml.push(`image_count: ${content.metadata.imageCount}`);
+        
+        // 模型信息
+        if (content.metadata.models.speechModel) {
+            yaml.push(`speech_model: "${content.metadata.models.speechModel}"`);
+        }
+        if (content.metadata.models.ocrModel) {
+            yaml.push(`ocr_model: "${content.metadata.models.ocrModel}"`);
+        }
+        if (content.metadata.models.textModel) {
+            yaml.push(`text_model: "${content.metadata.models.textModel}"`);
+        }
+        
+        // 处理时间
+        if (content.metadata.totalProcessingTime) {
+            yaml.push(`processing_time: "${content.metadata.totalProcessingTime}"`);
+        }
+        
+        yaml.push('---');
+        yaml.push('');
+        
+        return yaml.join('\n');
+    }
+
+    /**
+     * 生成音频部分
+     */
+    private generateAudioSection(
+        audioData: NonNullable<MultimodalContent['audio']>,
+        options: NoteGenerationOptions['audioOptions']
+    ): string {
+        let content = `## 🎧 语音录音\n\n`;
+        
+        if (options.includeOriginalAudio && audioData.audioFilePath) {
+            content += `![[${audioData.audioFilePath}]]\n\n`;
+        }
+        
+        if (audioData.duration) {
+            content += `> 📊 录音时长: ${audioData.duration}`;
+            if (audioData.processingTime) {
+                content += ` | 处理时长: ${audioData.processingTime}`;
+            }
+            content += '\n\n';
+        }
+
+        if (options.showTranscription && audioData.transcribedText) {
+            content += `### 📝 语音转录\n\n`;
+            content += audioData.transcribedText + '\n\n';
+        }
+        
+        return content;
+    }
+
+    /**
+     * 生成图片部分
+     */
+    private generateImageSection(
+        imageData: NonNullable<MultimodalContent['images']>,
+        options: NoteGenerationOptions['imageOptions']
+    ): string {
+        let content = `## 📷 图片内容\n\n`;
+        
+        if (options.includeOriginalImages && imageData.items.length > 0) {
+            imageData.items.forEach((image, index) => {
+                content += `### 图片 ${index + 1}: ${image.fileName}\n\n`;
+                
+                // 显示图片
+                const imagePath = this.getImageDisplayPath(image);
+                if (imagePath) {
+                    content += `![[${imagePath}]]\n\n`;
+                }
+                
+                // 显示图片信息
+                content += `> 📊 文件大小: ${this.formatFileSize(image.fileSize)} | 类型: ${image.fileType}\n\n`;
+            });
+        }
+        
+        return content;
+    }
+
+    /**
+     * 生成OCR部分
+     */
+    private generateOCRSection(
+        imageData: NonNullable<MultimodalContent['images']>,
+        options: NoteGenerationOptions['imageOptions']
+    ): string {
+        let content = `## 🔍 文字识别结果\n\n`;
+        
+        if (options.showOCRText && imageData.ocrResults.size > 0) {
+            imageData.items.forEach((image, index) => {
+                const ocrResult = imageData.ocrResults.get(image.id);
+                if (ocrResult && ocrResult.text.trim()) {
+                    content += `### 图片 ${index + 1} 识别文字\n\n`;
+                    content += `> 来源: ${image.fileName}\n\n`;
+                    content += ocrResult.text + '\n\n';
+                }
+            });
+            
+            // 合并的OCR文字
+            if (imageData.totalOCRText && imageData.totalOCRText.trim()) {
+                content += `### 📋 所有图片文字汇总\n\n`;
+                content += imageData.totalOCRText + '\n\n';
+            }
+        }
+        
+        return content;
+    }
+
+    /**
+     * 生成综合分析部分
+     */
+    private generateSummarySection(
+        combinedText: string,
+        options: NoteGenerationOptions['summaryOptions']
+    ): string {
+        let content = `## 📋 内容分析\n\n`;
+        
+        if (options.combineAudioAndOCR) {
+            content += `### 🔄 综合处理\n\n`;
+            content += '> 以下内容基于语音转录和图片文字识别的综合分析\n\n';
+        }
+        
+        if (options.generateSummary) {
+            content += `### 📝 内容摘要\n\n`;
+            content += combinedText + '\n\n';
+        }
+        
+        if (options.generateTags) {
+            // 这里可以添加基于综合内容生成的标签
+            content += `### 🏷️ 相关标签\n\n`;
+            content += '#多模态笔记 #AI处理\n\n';
+        }
+        
+        return content;
+    }
+
+    /**
+     * 生成元数据部分
+     */
+    private generateMetadataSection(metadata: MultimodalContent['metadata']): string {
+        let content = `## 📊 处理信息\n\n`;
+        
+        const info = [];
+        info.push(`**创建时间**: ${metadata.createdAt.toLocaleString()}`);
+        
+        if (metadata.hasAudio) {
+            info.push(`**包含音频**: 是 (${metadata.audioCount} 个)`);
+        }
+        
+        if (metadata.hasImages) {
+            info.push(`**包含图片**: 是 (${metadata.imageCount} 张)`);
+        }
+        
+        if (metadata.totalProcessingTime) {
+            info.push(`**总处理时长**: ${metadata.totalProcessingTime}`);
+        }
+        
+        const models = [];
+        if (metadata.models.speechModel) models.push(`语音: ${metadata.models.speechModel}`);
+        if (metadata.models.ocrModel) models.push(`OCR: ${metadata.models.ocrModel}`);
+        if (metadata.models.textModel) models.push(`文本: ${metadata.models.textModel}`);
+        
+        if (models.length > 0) {
+            info.push(`**AI模型**: ${models.join(' | ')}`);
+        }
+        
+        content += info.join('\n') + '\n\n';
+        content += '---\n';
+        content += '*由 GetNote 插件自动生成*\n\n';
+        
+        return content;
+    }
+
+    /**
+     * 格式化多模态标题
+     */
+    private formatMultimodalTitle(content: MultimodalContent): string {
+        const dateStr = content.metadata.createdAt.toLocaleDateString('zh-CN', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit'
+        }).replace(/\//g, '-');
+        
+        const timeStr = content.metadata.createdAt.toLocaleTimeString('zh-CN', {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+        });
+        
+        const typeLabels = [];
+        if (content.metadata.hasAudio) typeLabels.push('语音');
+        if (content.metadata.hasImages) typeLabels.push('图片');
+        
+        const typeLabel = typeLabels.length > 1 ? '多模态' : typeLabels[0] || '笔记';
+        
+        return `${dateStr} ${timeStr} - ${typeLabel}笔记`;
+    }
+
+    /**
+     * 获取图片显示路径
+     */
+    private getImageDisplayPath(image: ImageItem): string | null {
+        // 如果图片已保存到vault，返回vault中的路径
+        // 检查图片是否有vault路径信息
+        if (image.vaultPath) {
+            return image.vaultPath;
+        }
+        return null;
     }
 
     /**
@@ -586,6 +870,220 @@ export class NoteGenerator {
     generateAudioFileName(noteFileName: string): string {
         // 将.md替换为对应的音频格式，在saveAudioFile中会根据实际格式调整
         return noteFileName.replace('.md', '.webm');
+    }
+
+    /**
+     * 保存图片文件到vault
+     */
+    async saveImageFile(
+        image: ImageItem,
+        folderPath: string,
+        fileName?: string
+    ): Promise<{ imageFile: TFile, imageFilePath: string, relativePath: string }> {
+        // 确保图片文件夹存在
+        const imageFolderPath = `${folderPath}/images`;
+        await this.ensureFolderExists(imageFolderPath);
+        
+        // 生成图片文件名
+        const imageFileName = fileName || this.generateImageFileName(image);
+        
+        // 构建完整图片文件路径
+        const fullImagePath = `${imageFolderPath}/${imageFileName}`;
+        
+        // 检查文件是否已存在，如果存在则添加序号
+        const finalImagePath = await this.getUniqueFilePath(fullImagePath);
+        
+        // 将File对象转换为ArrayBuffer
+        const arrayBuffer = await image.file.arrayBuffer();
+        
+        // 创建图片文件
+        const imageFile = await this.app.vault.createBinary(finalImagePath, arrayBuffer);
+        
+        // 返回相对于vault根目录的路径
+        const relativePath = finalImagePath;
+        
+        // 更新ImageItem的vault信息
+        image.vaultPath = relativePath;
+        image.vaultFile = imageFile;
+        
+        return { imageFile, imageFilePath: relativePath, relativePath };
+    }
+
+    /**
+     * 批量保存图片到vault
+     */
+    async saveImagesToVault(
+        images: ImageItem[],
+        folderPath: string
+    ): Promise<{
+        savedImages: Array<{ image: ImageItem, file: TFile, path: string }>;
+        errors: Array<{ image: ImageItem, error: string }>;
+    }> {
+        const savedImages: Array<{ image: ImageItem, file: TFile, path: string }> = [];
+        const errors: Array<{ image: ImageItem, error: string }> = [];
+
+        for (const image of images) {
+            try {
+                const result = await this.saveImageFile(image, folderPath);
+                savedImages.push({
+                    image,
+                    file: result.imageFile,
+                    path: result.imageFilePath
+                });
+                
+                console.log(`保存图片成功: ${image.fileName} -> ${result.imageFilePath}`);
+            } catch (error) {
+                const errorMsg = `保存图片失败: ${error.message}`;
+                errors.push({ image, error: errorMsg });
+                console.error(`保存图片失败: ${image.fileName}`, error);
+            }
+        }
+
+        return { savedImages, errors };
+    }
+
+    /**
+     * 生成图片文件名
+     */
+    generateImageFileName(image: ImageItem): string {
+        // 获取文件扩展名
+        const extension = this.getImageFileExtension(image.fileType);
+        
+        // 使用时间戳和原文件名生成唯一文件名
+        const timestamp = image.addedAt.getTime();
+        const baseName = image.fileName.replace(/\.[^/.]+$/, ''); // 移除原扩展名
+        const safeName = this.sanitizeFileName(baseName);
+        
+        return `${timestamp}_${safeName}${extension}`;
+    }
+
+    /**
+     * 根据MIME类型获取文件扩展名
+     */
+    private getImageFileExtension(mimeType: string): string {
+        const extensions: { [key: string]: string } = {
+            'image/jpeg': '.jpg',
+            'image/jpg': '.jpg',
+            'image/png': '.png',
+            'image/gif': '.gif',
+            'image/webp': '.webp',
+            'image/bmp': '.bmp',
+            'image/tiff': '.tiff'
+        };
+        
+        return extensions[mimeType.toLowerCase()] || '.jpg';
+    }
+
+    /**
+     * 清理文件名，移除不安全字符
+     */
+    private sanitizeFileName(fileName: string): string {
+        return fileName
+            .replace(/[<>:"/\\|?*]/g, '_') // 替换Windows不安全字符
+            .replace(/\s+/g, '_') // 替换空格
+            .replace(/_{2,}/g, '_') // 合并多个下划线
+            .replace(/^_|_$/g, '') // 移除开头和结尾的下划线
+            .slice(0, 50); // 限制长度
+    }
+
+    /**
+     * 生成多模态笔记并保存所有资源
+     */
+    async generateAndSaveMultimodalNote(
+        multimodalContent: MultimodalContent,
+        options: NoteGenerationOptions,
+        folderPath: string,
+        fileName: string
+    ): Promise<{
+        noteFile: TFile;
+        savedImages: Array<{ image: ImageItem, file: TFile, path: string }>;
+        audioFile?: TFile;
+        errors: string[];
+    }> {
+        const errors: string[] = [];
+        let savedImages: Array<{ image: ImageItem, file: TFile, path: string }> = [];
+        let audioFile: TFile | undefined;
+
+        try {
+            // 1. 保存图片文件
+            if (multimodalContent.images && multimodalContent.images.items.length > 0) {
+                const imageResult = await this.saveImagesToVault(multimodalContent.images.items, folderPath);
+                savedImages = imageResult.savedImages;
+                
+                if (imageResult.errors.length > 0) {
+                    errors.push(...imageResult.errors.map(e => e.error));
+                }
+            }
+
+            // 2. 保存音频文件（如果有）
+            if (multimodalContent.audio && multimodalContent.audio.audioBlob) {
+                try {
+                    const audioResult = await this.saveAudioFile(
+                        multimodalContent.audio.audioBlob,
+                        folderPath,
+                        fileName.replace('.md', '.webm')
+                    );
+                    audioFile = audioResult.audioFile;
+                    
+                    // 更新音频路径信息
+                    if (multimodalContent.audio) {
+                        multimodalContent.audio.audioFilePath = audioResult.audioFilePath;
+                    }
+                } catch (error) {
+                    errors.push(`音频保存失败: ${error.message}`);
+                }
+            }
+
+            // 3. 生成笔记内容
+            const noteContent = this.generateMultimodalNoteContent(multimodalContent, options);
+
+            // 4. 保存笔记文件
+            const noteFile = await this.saveNote(noteContent, folderPath, fileName);
+
+            return {
+                noteFile,
+                savedImages,
+                audioFile,
+                errors
+            };
+
+        } catch (error) {
+            errors.push(`笔记生成失败: ${error.message}`);
+            throw new Error(`多模态笔记保存失败: ${errors.join(', ')}`);
+        }
+    }
+
+    /**
+     * 创建默认的笔记生成选项
+     */
+    createDefaultNoteOptions(settings: {
+        includeOCRInNote: boolean;
+        showOriginalImages: boolean;
+        combineAudioAndOCR: boolean;
+        keepOriginalAudio: boolean;
+        includeMetadata: boolean;
+    }): NoteGenerationOptions {
+        return {
+            includeAudioSection: true,
+            includeOCRSection: settings.includeOCRInNote,
+            includeImageSection: settings.showOriginalImages,
+            includeSummarySection: settings.combineAudioAndOCR,
+            includeMetadata: settings.includeMetadata,
+            audioOptions: {
+                includeOriginalAudio: settings.keepOriginalAudio,
+                showTranscription: true
+            },
+            imageOptions: {
+                includeOriginalImages: settings.showOriginalImages,
+                showOCRText: settings.includeOCRInNote,
+                thumbnailSize: 'medium'
+            },
+            summaryOptions: {
+                generateTags: true,
+                generateSummary: true,
+                combineAudioAndOCR: settings.combineAudioAndOCR
+            }
+        };
     }
 
     /**

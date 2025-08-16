@@ -22,6 +22,13 @@ export interface GetNoteSettings {
     maxRetries: number;
     // 音频保留设置
     keepOriginalAudio: boolean;
+    // OCR图片处理设置
+    enableImageOCR: boolean;
+    ocrModel: string;
+    includeOCRInNote: boolean;
+    showOriginalImages: boolean;
+    combineAudioAndOCR: boolean;
+    maxImageSize: number; // MB
 }
 
 export const DEFAULT_SETTINGS: GetNoteSettings = {
@@ -42,13 +49,21 @@ export const DEFAULT_SETTINGS: GetNoteSettings = {
     generateTags: true,
     maxRetries: 2,
     // 音频保留默认设置
-    keepOriginalAudio: false
+    keepOriginalAudio: false,
+    // OCR图片处理默认设置
+    enableImageOCR: false,
+    ocrModel: 'qwen-vl-ocr-latest',
+    includeOCRInNote: true,
+    showOriginalImages: true,
+    combineAudioAndOCR: true,
+    maxImageSize: 10 // 10MB
 };
 
 export class GetNoteSettingTab extends PluginSettingTab {
     plugin: GetNotePlugin;
     private apiTestResult: HTMLElement | null = null;
     private textLLMTestResult: HTMLElement | null = null;
+    private ocrTestResult: HTMLElement | null = null;
 
     constructor(app: App, plugin: GetNotePlugin) {
         super(app, plugin);
@@ -66,6 +81,9 @@ export class GetNoteSettingTab extends PluginSettingTab {
 
         // LLM文本处理设置部分
         this.createLLMSettings(containerEl);
+
+        // OCR图片处理设置部分
+        this.createOCRSettings(containerEl);
 
         // 录音设置部分  
         this.createRecordingSettings(containerEl);
@@ -205,6 +223,98 @@ export class GetNoteSettingTab extends PluginSettingTab {
 
             // 文本LLM测试结果显示区域
             this.textLLMTestResult = textLLMTestSetting.settingEl.createDiv('text-llm-test-result');
+        }
+    }
+
+    private createOCRSettings(containerEl: HTMLElement): void {
+        containerEl.createEl('h3', { text: '🔍 OCR图片识别设置' });
+
+        // OCR功能开关
+        new Setting(containerEl)
+            .setName('启用图片OCR识别')
+            .setDesc('使用AI模型识别图片中的文字内容，支持与语音笔记结合')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.enableImageOCR)
+                .onChange(async (value) => {
+                    this.plugin.settings.enableImageOCR = value;
+                    await this.plugin.saveSettings();
+                    // 重新显示设置页面以更新相关设置的可见性
+                    this.display();
+                }));
+
+        // 只有启用OCR处理时才显示以下设置
+        if (this.plugin.settings.enableImageOCR) {
+            new Setting(containerEl)
+                .setName('OCR识别模型')
+                .setDesc('选择用于图片文字识别的AI模型')
+                .addDropdown(dropdown => dropdown
+                    .addOption('qwen-vl-ocr-latest', 'Qwen VL OCR Latest (推荐)')
+                    .addOption('qwen-vl-ocr', 'Qwen VL OCR (标准版)')
+                    .setValue(this.plugin.settings.ocrModel)
+                    .onChange(async (value) => {
+                        this.plugin.settings.ocrModel = value;
+                        await this.plugin.saveSettings();
+                        // 清除OCR测试结果
+                        if (this.ocrTestResult) {
+                            this.ocrTestResult.empty();
+                        }
+                    }));
+
+            new Setting(containerEl)
+                .setName('OCR内容显示')
+                .setDesc('在生成的笔记中显示OCR识别的文字内容')
+                .addToggle(toggle => toggle
+                    .setValue(this.plugin.settings.includeOCRInNote)
+                    .onChange(async (value) => {
+                        this.plugin.settings.includeOCRInNote = value;
+                        await this.plugin.saveSettings();
+                    }));
+
+            new Setting(containerEl)
+                .setName('显示原始图片')
+                .setDesc('在笔记中显示原始图片文件')
+                .addToggle(toggle => toggle
+                    .setValue(this.plugin.settings.showOriginalImages)
+                    .onChange(async (value) => {
+                        this.plugin.settings.showOriginalImages = value;
+                        await this.plugin.saveSettings();
+                    }));
+
+            new Setting(containerEl)
+                .setName('音频与OCR文字合并')
+                .setDesc('将语音转录文字和OCR识别文字合并后一起发送给AI进行处理')
+                .addToggle(toggle => toggle
+                    .setValue(this.plugin.settings.combineAudioAndOCR)
+                    .onChange(async (value) => {
+                        this.plugin.settings.combineAudioAndOCR = value;
+                        await this.plugin.saveSettings();
+                    }));
+
+            new Setting(containerEl)
+                .setName('图片大小限制')
+                .setDesc('单张图片的最大文件大小（MB）')
+                .addText(text => text
+                    .setPlaceholder('10')
+                    .setValue(this.plugin.settings.maxImageSize.toString())
+                    .onChange(async (value) => {
+                        const size = parseInt(value) || 10;
+                        this.plugin.settings.maxImageSize = Math.max(1, Math.min(50, size));
+                        await this.plugin.saveSettings();
+                    }));
+
+            // OCR测试按钮
+            const ocrTestSetting = new Setting(containerEl)
+                .setName('OCR功能测试')
+                .setDesc('测试OCR图片识别功能是否正常工作')
+                .addButton(button => button
+                    .setButtonText('测试OCR')
+                    .setCta()
+                    .onClick(async () => {
+                        await this.testOCR(button.buttonEl);
+                    }));
+
+            // OCR测试结果显示区域
+            this.ocrTestResult = ocrTestSetting.settingEl.createDiv('ocr-test-result');
         }
     }
 
@@ -429,6 +539,39 @@ export class GetNoteSettingTab extends PluginSettingTab {
         }
     }
 
+    private async testOCR(buttonEl: HTMLButtonElement): Promise<void> {
+        if (!this.plugin.settings.apiKey.trim()) {
+            this.showOCRTestResult('请先输入API Key', 'error');
+            return;
+        }
+
+        buttonEl.setText('测试中...');
+        buttonEl.disabled = true;
+
+        try {
+            console.log('开始OCR功能测试，模型:', this.plugin.settings.ocrModel);
+            
+            const client = new DashScopeClient(this.plugin.settings.apiKey);
+            const result = await client.testOCR();
+            
+            if (result.success) {
+                this.showOCRTestResult('✅ OCR功能测试成功！', 'success');
+                console.log('OCR测试成功');
+            } else {
+                const errorMsg = result.error || '未知错误';
+                this.showOCRTestResult(`❌ OCR功能测试失败: ${errorMsg}`, 'error');
+                console.error('OCR测试失败:', errorMsg);
+            }
+        } catch (error) {
+            const errorMsg = `OCR测试异常: ${error.message}`;
+            this.showOCRTestResult(`❌ ${errorMsg}`, 'error');
+            console.error('OCR测试异常:', error);
+        } finally {
+            buttonEl.setText('测试OCR');
+            buttonEl.disabled = false;
+        }
+    }
+
     private showTestResult(message: string, type: 'success' | 'error'): void {
         if (this.apiTestResult) {
             this.apiTestResult.empty();
@@ -451,6 +594,24 @@ export class GetNoteSettingTab extends PluginSettingTab {
         if (this.textLLMTestResult) {
             this.textLLMTestResult.empty();
             const resultEl = this.textLLMTestResult.createDiv();
+            resultEl.setText(message);
+            resultEl.addClass(`test-result-${type}`);
+            
+            // 添加简单的样式
+            if (type === 'success') {
+                resultEl.style.color = '#10b981';
+            } else {
+                resultEl.style.color = '#ef4444';
+            }
+            resultEl.style.marginTop = '8px';
+            resultEl.style.fontSize = '14px';
+        }
+    }
+
+    private showOCRTestResult(message: string, type: 'success' | 'error'): void {
+        if (this.ocrTestResult) {
+            this.ocrTestResult.empty();
+            const resultEl = this.ocrTestResult.createDiv();
             resultEl.setText(message);
             resultEl.addClass(`test-result-${type}`);
             

@@ -14,5 +14,11 @@
   "processOriginalText": true,
   "generateTags": true,
   "maxRetries": 2,
-  "keepOriginalAudio": true
+  "keepOriginalAudio": true,
+  "enableImageOCR": true,
+  "ocrModel": "qwen-vl-ocr-latest",
+  "includeOCRInNote": false,
+  "showOriginalImages": true,
+  "combineAudioAndOCR": true,
+  "maxImageSize": 10
 }

@@ -6,6 +6,7 @@ export interface DashScopeMessage {
     content: Array<{
         audio?: string;
         text?: string;
+        image?: string; // 添加image支持
     }>;
 }
 
@@ -70,6 +71,27 @@ export interface CompatibleResponse {
 export interface TextProcessingResult {
     processedText: string;
     tags: string[];
+}
+
+// OCR处理结果接口
+export interface OCRResult {
+    text: string;
+    confidence?: number;
+    processedAt: Date;
+}
+
+// 批量OCR处理结果接口
+export interface BatchOCRResult {
+    results: Array<{
+        imageId: string;
+        fileName: string;
+        ocrResult: OCRResult;
+        success: boolean;
+        error?: string;
+    }>;
+    totalImages: number;
+    successCount: number;
+    failureCount: number;
 }
 
 export class DashScopeClient {
@@ -291,6 +313,166 @@ export class DashScopeClient {
         return { valid: true };
     }
 
+    // OCR图片文字识别
+    async processImageOCR(imageBase64: string, mimeType: string): Promise<OCRResult> {
+        try {
+            console.log(`处理图片OCR: 类型=${mimeType}, 大小=${imageBase64.length}字符`);
+
+            // qwen-vl-ocr-latest 专门用于图片文字识别
+            const request: DashScopeRequest = {
+                model: 'qwen-vl-ocr-latest',
+                input: {
+                    messages: [
+                        {
+                            role: 'user',
+                            content: [
+                                {
+                                    image: `data:${mimeType};base64,${imageBase64}`
+                                },
+                                {
+                                    text: '请识别图片中的所有文字内容，保持原有的格式和布局，直接输出识别到的文字，不要添加额外的说明。'
+                                }
+                            ]
+                        }
+                    ]
+                }
+            };
+
+            console.log('=== OCR API调试信息 ===');
+            console.log('请求URL:', this.baseUrl);
+            console.log('OCR模型:', request.model);
+            console.log('========================');
+
+            const response = await requestUrl({
+                url: this.baseUrl,
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${this.apiKey}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(request),
+                throw: false
+            });
+
+            console.log('OCR API响应状态:', response.status);
+
+            if (response.status >= 400) {
+                console.error('OCR API错误详情:', response.text);
+                throw new Error(`OCR API请求失败 (${response.status}): ${response.text}`);
+            }
+
+            const data: DashScopeResponse = response.json;
+            console.log('OCR API响应数据:', JSON.stringify(data, null, 2));
+
+            if (data.output?.choices?.[0]?.message?.content?.[0]?.text) {
+                const ocrText = data.output.choices[0].message.content[0].text.trim();
+                return {
+                    text: ocrText,
+                    processedAt: new Date()
+                };
+            } else {
+                console.error('OCR API返回格式异常:', data);
+                throw new Error('OCR API返回数据格式异常');
+            }
+
+        } catch (error) {
+            console.error('OCR处理失败:', error);
+            
+            if (error instanceof TypeError && error.message === 'Failed to fetch') {
+                throw new Error('网络连接失败，请检查网络状态和API Key是否正确');
+            } else if (error.message.includes('401')) {
+                throw new Error('API Key无效，请检查您的密钥配置');
+            } else if (error.message.includes('429')) {
+                throw new Error('API调用频率超限，请稍后重试');
+            } else {
+                throw new Error(`OCR处理失败: ${error.message}`);
+            }
+        }
+    }
+
+    // 批量处理多张图片的OCR
+    async processBatchImageOCR(images: Array<{
+        id: string;
+        fileName: string;
+        base64: string;
+        mimeType: string;
+    }>): Promise<BatchOCRResult> {
+        console.log(`开始批量OCR处理，共${images.length}张图片`);
+        
+        const results = [];
+        let successCount = 0;
+        let failureCount = 0;
+
+        for (const image of images) {
+            try {
+                console.log(`处理图片: ${image.fileName}`);
+                const ocrResult = await this.processImageOCR(image.base64, image.mimeType);
+                
+                results.push({
+                    imageId: image.id,
+                    fileName: image.fileName,
+                    ocrResult,
+                    success: true
+                });
+                
+                successCount++;
+                console.log(`✅ ${image.fileName} OCR处理成功`);
+                
+                // 添加短暂延迟，避免API频率限制
+                await this.delay(500);
+                
+            } catch (error) {
+                results.push({
+                    imageId: image.id,
+                    fileName: image.fileName,
+                    ocrResult: { text: '', processedAt: new Date() },
+                    success: false,
+                    error: error.message
+                });
+                
+                failureCount++;
+                console.error(`❌ ${image.fileName} OCR处理失败:`, error.message);
+            }
+        }
+
+        return {
+            results,
+            totalImages: images.length,
+            successCount,
+            failureCount
+        };
+    }
+
+    // 检查图片文件大小限制
+    checkImageSize(imageSize: number): { valid: boolean; message?: string } {
+        const maxSize = 10 * 1024 * 1024; // 10MB限制
+        
+        if (imageSize > maxSize) {
+            return {
+                valid: false,
+                message: `图片文件过大，最大支持${maxSize / 1024 / 1024}MB`
+            };
+        }
+
+        return { valid: true };
+    }
+
+    // 获取支持的图片格式
+    getSupportedImageFormats(): string[] {
+        return [
+            'image/jpeg',
+            'image/jpg', 
+            'image/png',
+            'image/gif',
+            'image/webp'
+        ];
+    }
+
+    // 延迟函数
+    private delay(ms: number): Promise<void> {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
     // 创建自定义提示词用于不同的音频处理场景
     createPrompt(scenario: 'transcription' | 'summary' | 'notes' | 'action-items'): string {
         const prompts = {
@@ -450,5 +632,76 @@ export class DashScopeClient {
                 error: errorMessage 
             };
         }
+    }
+
+    // 测试OCR功能
+    async testOCR(): Promise<{ success: boolean; error?: string }> {
+        try {
+            console.log('开始OCR功能测试...');
+            
+            // 创建一个简单的测试图片（纯色背景上的文字）
+            const testImageBase64 = await this.createTestImage();
+            
+            const ocrResult = await this.processImageOCR(testImageBase64, 'image/png');
+            
+            if (ocrResult.text && ocrResult.text.length > 0) {
+                console.log('OCR功能测试成功，识别文字:', ocrResult.text);
+                return { success: true };
+            } else {
+                return { 
+                    success: false, 
+                    error: 'OCR未识别到文字内容' 
+                };
+            }
+
+        } catch (error) {
+            console.error('OCR功能测试失败:', error);
+            
+            let errorMessage = '未知错误';
+            if (error instanceof TypeError && error.message === 'Failed to fetch') {
+                errorMessage = '网络连接失败';
+            } else if (error.message) {
+                errorMessage = error.message;
+            }
+            
+            return { 
+                success: false, 
+                error: errorMessage 
+            };
+        }
+    }
+
+    // 创建测试图片（包含简单文字）
+    private async createTestImage(): Promise<string> {
+        return new Promise((resolve, reject) => {
+            try {
+                const canvas = document.createElement('canvas');
+                canvas.width = 300;
+                canvas.height = 100;
+                const ctx = canvas.getContext('2d');
+                
+                if (!ctx) {
+                    reject(new Error('无法创建Canvas上下文'));
+                    return;
+                }
+
+                // 绘制白色背景
+                ctx.fillStyle = '#FFFFFF';
+                ctx.fillRect(0, 0, 300, 100);
+
+                // 绘制黑色文字
+                ctx.fillStyle = '#000000';
+                ctx.font = '20px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('OCR测试文字', 150, 50);
+
+                // 转换为base64
+                const dataUrl = canvas.toDataURL('image/png');
+                const base64 = dataUrl.split(',')[1];
+                resolve(base64);
+            } catch (error) {
+                reject(error);
+            }
+        });
     }
 }

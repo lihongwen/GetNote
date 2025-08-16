@@ -360,6 +360,136 @@ var DashScopeClient = class {
     }
     return { valid: true };
   }
+  // OCR图片文字识别
+  async processImageOCR(imageBase64, mimeType) {
+    var _a, _b, _c, _d, _e, _f;
+    try {
+      console.log(`\u5904\u7406\u56FE\u7247OCR: \u7C7B\u578B=${mimeType}, \u5927\u5C0F=${imageBase64.length}\u5B57\u7B26`);
+      const request = {
+        model: "qwen-vl-ocr-latest",
+        input: {
+          messages: [
+            {
+              role: "user",
+              content: [
+                {
+                  image: `data:${mimeType};base64,${imageBase64}`
+                },
+                {
+                  text: "\u8BF7\u8BC6\u522B\u56FE\u7247\u4E2D\u7684\u6240\u6709\u6587\u5B57\u5185\u5BB9\uFF0C\u4FDD\u6301\u539F\u6709\u7684\u683C\u5F0F\u548C\u5E03\u5C40\uFF0C\u76F4\u63A5\u8F93\u51FA\u8BC6\u522B\u5230\u7684\u6587\u5B57\uFF0C\u4E0D\u8981\u6DFB\u52A0\u989D\u5916\u7684\u8BF4\u660E\u3002"
+                }
+              ]
+            }
+          ]
+        }
+      };
+      console.log("=== OCR API\u8C03\u8BD5\u4FE1\u606F ===");
+      console.log("\u8BF7\u6C42URL:", this.baseUrl);
+      console.log("OCR\u6A21\u578B:", request.model);
+      console.log("========================");
+      const response = await (0, import_obsidian.requestUrl)({
+        url: this.baseUrl,
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${this.apiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(request),
+        throw: false
+      });
+      console.log("OCR API\u54CD\u5E94\u72B6\u6001:", response.status);
+      if (response.status >= 400) {
+        console.error("OCR API\u9519\u8BEF\u8BE6\u60C5:", response.text);
+        throw new Error(`OCR API\u8BF7\u6C42\u5931\u8D25 (${response.status}): ${response.text}`);
+      }
+      const data = response.json;
+      console.log("OCR API\u54CD\u5E94\u6570\u636E:", JSON.stringify(data, null, 2));
+      if ((_f = (_e = (_d = (_c = (_b = (_a = data.output) == null ? void 0 : _a.choices) == null ? void 0 : _b[0]) == null ? void 0 : _c.message) == null ? void 0 : _d.content) == null ? void 0 : _e[0]) == null ? void 0 : _f.text) {
+        const ocrText = data.output.choices[0].message.content[0].text.trim();
+        return {
+          text: ocrText,
+          processedAt: new Date()
+        };
+      } else {
+        console.error("OCR API\u8FD4\u56DE\u683C\u5F0F\u5F02\u5E38:", data);
+        throw new Error("OCR API\u8FD4\u56DE\u6570\u636E\u683C\u5F0F\u5F02\u5E38");
+      }
+    } catch (error) {
+      console.error("OCR\u5904\u7406\u5931\u8D25:", error);
+      if (error instanceof TypeError && error.message === "Failed to fetch") {
+        throw new Error("\u7F51\u7EDC\u8FDE\u63A5\u5931\u8D25\uFF0C\u8BF7\u68C0\u67E5\u7F51\u7EDC\u72B6\u6001\u548CAPI Key\u662F\u5426\u6B63\u786E");
+      } else if (error.message.includes("401")) {
+        throw new Error("API Key\u65E0\u6548\uFF0C\u8BF7\u68C0\u67E5\u60A8\u7684\u5BC6\u94A5\u914D\u7F6E");
+      } else if (error.message.includes("429")) {
+        throw new Error("API\u8C03\u7528\u9891\u7387\u8D85\u9650\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5");
+      } else {
+        throw new Error(`OCR\u5904\u7406\u5931\u8D25: ${error.message}`);
+      }
+    }
+  }
+  // 批量处理多张图片的OCR
+  async processBatchImageOCR(images) {
+    console.log(`\u5F00\u59CB\u6279\u91CFOCR\u5904\u7406\uFF0C\u5171${images.length}\u5F20\u56FE\u7247`);
+    const results = [];
+    let successCount = 0;
+    let failureCount = 0;
+    for (const image of images) {
+      try {
+        console.log(`\u5904\u7406\u56FE\u7247: ${image.fileName}`);
+        const ocrResult = await this.processImageOCR(image.base64, image.mimeType);
+        results.push({
+          imageId: image.id,
+          fileName: image.fileName,
+          ocrResult,
+          success: true
+        });
+        successCount++;
+        console.log(`\u2705 ${image.fileName} OCR\u5904\u7406\u6210\u529F`);
+        await this.delay(500);
+      } catch (error) {
+        results.push({
+          imageId: image.id,
+          fileName: image.fileName,
+          ocrResult: { text: "", processedAt: new Date() },
+          success: false,
+          error: error.message
+        });
+        failureCount++;
+        console.error(`\u274C ${image.fileName} OCR\u5904\u7406\u5931\u8D25:`, error.message);
+      }
+    }
+    return {
+      results,
+      totalImages: images.length,
+      successCount,
+      failureCount
+    };
+  }
+  // 检查图片文件大小限制
+  checkImageSize(imageSize) {
+    const maxSize = 10 * 1024 * 1024;
+    if (imageSize > maxSize) {
+      return {
+        valid: false,
+        message: `\u56FE\u7247\u6587\u4EF6\u8FC7\u5927\uFF0C\u6700\u5927\u652F\u6301${maxSize / 1024 / 1024}MB`
+      };
+    }
+    return { valid: true };
+  }
+  // 获取支持的图片格式
+  getSupportedImageFormats() {
+    return [
+      "image/jpeg",
+      "image/jpg",
+      "image/png",
+      "image/gif",
+      "image/webp"
+    ];
+  }
+  // 延迟函数
+  delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
   // 创建自定义提示词用于不同的音频处理场景
   createPrompt(scenario) {
     const prompts = {
@@ -498,6 +628,61 @@ ${text}`
       };
     }
   }
+  // 测试OCR功能
+  async testOCR() {
+    try {
+      console.log("\u5F00\u59CBOCR\u529F\u80FD\u6D4B\u8BD5...");
+      const testImageBase64 = await this.createTestImage();
+      const ocrResult = await this.processImageOCR(testImageBase64, "image/png");
+      if (ocrResult.text && ocrResult.text.length > 0) {
+        console.log("OCR\u529F\u80FD\u6D4B\u8BD5\u6210\u529F\uFF0C\u8BC6\u522B\u6587\u5B57:", ocrResult.text);
+        return { success: true };
+      } else {
+        return {
+          success: false,
+          error: "OCR\u672A\u8BC6\u522B\u5230\u6587\u5B57\u5185\u5BB9"
+        };
+      }
+    } catch (error) {
+      console.error("OCR\u529F\u80FD\u6D4B\u8BD5\u5931\u8D25:", error);
+      let errorMessage = "\u672A\u77E5\u9519\u8BEF";
+      if (error instanceof TypeError && error.message === "Failed to fetch") {
+        errorMessage = "\u7F51\u7EDC\u8FDE\u63A5\u5931\u8D25";
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      return {
+        success: false,
+        error: errorMessage
+      };
+    }
+  }
+  // 创建测试图片（包含简单文字）
+  async createTestImage() {
+    return new Promise((resolve, reject) => {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = 300;
+        canvas.height = 100;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          reject(new Error("\u65E0\u6CD5\u521B\u5EFACanvas\u4E0A\u4E0B\u6587"));
+          return;
+        }
+        ctx.fillStyle = "#FFFFFF";
+        ctx.fillRect(0, 0, 300, 100);
+        ctx.fillStyle = "#000000";
+        ctx.font = "20px Arial";
+        ctx.textAlign = "center";
+        ctx.fillText("OCR\u6D4B\u8BD5\u6587\u5B57", 150, 50);
+        const dataUrl = canvas.toDataURL("image/png");
+        const base64 = dataUrl.split(",")[1];
+        resolve(base64);
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
 };
 
 // src/note-generator.ts
@@ -566,6 +751,234 @@ var NoteGenerator = class {
     yaml.push("---");
     yaml.push("");
     return yaml.join("\n");
+  }
+  /**
+   * 生成多模态笔记内容（音频+图片+OCR）
+   */
+  generateMultimodalNoteContent(multimodalContent, options) {
+    let content = "";
+    content += this.generateMultimodalYAMLFrontMatter(multimodalContent, options);
+    const title = this.formatMultimodalTitle(multimodalContent);
+    content += `# ${title}
+
+`;
+    if (options.includeAudioSection && multimodalContent.audio) {
+      content += this.generateAudioSection(multimodalContent.audio, options.audioOptions);
+    }
+    if (options.includeImageSection && multimodalContent.images && multimodalContent.images.items.length > 0) {
+      content += this.generateImageSection(multimodalContent.images, options.imageOptions);
+    }
+    if (options.includeOCRSection && multimodalContent.images && multimodalContent.images.totalOCRText) {
+      content += this.generateOCRSection(multimodalContent.images, options.imageOptions);
+    }
+    if (options.includeSummarySection && multimodalContent.combinedText) {
+      content += this.generateSummarySection(multimodalContent.combinedText, options.summaryOptions);
+    }
+    if (options.includeMetadata) {
+      content += this.generateMetadataSection(multimodalContent.metadata);
+    }
+    return content;
+  }
+  /**
+   * 生成多模态YAML front matter
+   */
+  generateMultimodalYAMLFrontMatter(content, options) {
+    const yaml = [];
+    yaml.push("---");
+    yaml.push(`created: ${this.formatObsidianDate(content.metadata.createdAt)}`);
+    yaml.push(`title: "${this.escapeYamlValue(content.metadata.hasAudio ? "\u591A\u6A21\u6001\u8BED\u97F3\u7B14\u8BB0" : "\u56FE\u7247\u7B14\u8BB0")}"`);
+    yaml.push(`note_type: "multimodal_note"`);
+    yaml.push(`has_audio: ${content.metadata.hasAudio}`);
+    yaml.push(`has_images: ${content.metadata.hasImages}`);
+    yaml.push(`audio_count: ${content.metadata.audioCount}`);
+    yaml.push(`image_count: ${content.metadata.imageCount}`);
+    if (content.metadata.models.speechModel) {
+      yaml.push(`speech_model: "${content.metadata.models.speechModel}"`);
+    }
+    if (content.metadata.models.ocrModel) {
+      yaml.push(`ocr_model: "${content.metadata.models.ocrModel}"`);
+    }
+    if (content.metadata.models.textModel) {
+      yaml.push(`text_model: "${content.metadata.models.textModel}"`);
+    }
+    if (content.metadata.totalProcessingTime) {
+      yaml.push(`processing_time: "${content.metadata.totalProcessingTime}"`);
+    }
+    yaml.push("---");
+    yaml.push("");
+    return yaml.join("\n");
+  }
+  /**
+   * 生成音频部分
+   */
+  generateAudioSection(audioData, options) {
+    let content = `## \u{1F3A7} \u8BED\u97F3\u5F55\u97F3
+
+`;
+    if (options.includeOriginalAudio && audioData.audioFilePath) {
+      content += `![[${audioData.audioFilePath}]]
+
+`;
+    }
+    if (audioData.duration) {
+      content += `> \u{1F4CA} \u5F55\u97F3\u65F6\u957F: ${audioData.duration}`;
+      if (audioData.processingTime) {
+        content += ` | \u5904\u7406\u65F6\u957F: ${audioData.processingTime}`;
+      }
+      content += "\n\n";
+    }
+    if (options.showTranscription && audioData.transcribedText) {
+      content += `### \u{1F4DD} \u8BED\u97F3\u8F6C\u5F55
+
+`;
+      content += audioData.transcribedText + "\n\n";
+    }
+    return content;
+  }
+  /**
+   * 生成图片部分
+   */
+  generateImageSection(imageData, options) {
+    let content = `## \u{1F4F7} \u56FE\u7247\u5185\u5BB9
+
+`;
+    if (options.includeOriginalImages && imageData.items.length > 0) {
+      imageData.items.forEach((image, index) => {
+        content += `### \u56FE\u7247 ${index + 1}: ${image.fileName}
+
+`;
+        const imagePath = this.getImageDisplayPath(image);
+        if (imagePath) {
+          content += `![[${imagePath}]]
+
+`;
+        }
+        content += `> \u{1F4CA} \u6587\u4EF6\u5927\u5C0F: ${this.formatFileSize(image.fileSize)} | \u7C7B\u578B: ${image.fileType}
+
+`;
+      });
+    }
+    return content;
+  }
+  /**
+   * 生成OCR部分
+   */
+  generateOCRSection(imageData, options) {
+    let content = `## \u{1F50D} \u6587\u5B57\u8BC6\u522B\u7ED3\u679C
+
+`;
+    if (options.showOCRText && imageData.ocrResults.size > 0) {
+      imageData.items.forEach((image, index) => {
+        const ocrResult = imageData.ocrResults.get(image.id);
+        if (ocrResult && ocrResult.text.trim()) {
+          content += `### \u56FE\u7247 ${index + 1} \u8BC6\u522B\u6587\u5B57
+
+`;
+          content += `> \u6765\u6E90: ${image.fileName}
+
+`;
+          content += ocrResult.text + "\n\n";
+        }
+      });
+      if (imageData.totalOCRText && imageData.totalOCRText.trim()) {
+        content += `### \u{1F4CB} \u6240\u6709\u56FE\u7247\u6587\u5B57\u6C47\u603B
+
+`;
+        content += imageData.totalOCRText + "\n\n";
+      }
+    }
+    return content;
+  }
+  /**
+   * 生成综合分析部分
+   */
+  generateSummarySection(combinedText, options) {
+    let content = `## \u{1F4CB} \u5185\u5BB9\u5206\u6790
+
+`;
+    if (options.combineAudioAndOCR) {
+      content += `### \u{1F504} \u7EFC\u5408\u5904\u7406
+
+`;
+      content += "> \u4EE5\u4E0B\u5185\u5BB9\u57FA\u4E8E\u8BED\u97F3\u8F6C\u5F55\u548C\u56FE\u7247\u6587\u5B57\u8BC6\u522B\u7684\u7EFC\u5408\u5206\u6790\n\n";
+    }
+    if (options.generateSummary) {
+      content += `### \u{1F4DD} \u5185\u5BB9\u6458\u8981
+
+`;
+      content += combinedText + "\n\n";
+    }
+    if (options.generateTags) {
+      content += `### \u{1F3F7}\uFE0F \u76F8\u5173\u6807\u7B7E
+
+`;
+      content += "#\u591A\u6A21\u6001\u7B14\u8BB0 #AI\u5904\u7406\n\n";
+    }
+    return content;
+  }
+  /**
+   * 生成元数据部分
+   */
+  generateMetadataSection(metadata) {
+    let content = `## \u{1F4CA} \u5904\u7406\u4FE1\u606F
+
+`;
+    const info = [];
+    info.push(`**\u521B\u5EFA\u65F6\u95F4**: ${metadata.createdAt.toLocaleString()}`);
+    if (metadata.hasAudio) {
+      info.push(`**\u5305\u542B\u97F3\u9891**: \u662F (${metadata.audioCount} \u4E2A)`);
+    }
+    if (metadata.hasImages) {
+      info.push(`**\u5305\u542B\u56FE\u7247**: \u662F (${metadata.imageCount} \u5F20)`);
+    }
+    if (metadata.totalProcessingTime) {
+      info.push(`**\u603B\u5904\u7406\u65F6\u957F**: ${metadata.totalProcessingTime}`);
+    }
+    const models = [];
+    if (metadata.models.speechModel)
+      models.push(`\u8BED\u97F3: ${metadata.models.speechModel}`);
+    if (metadata.models.ocrModel)
+      models.push(`OCR: ${metadata.models.ocrModel}`);
+    if (metadata.models.textModel)
+      models.push(`\u6587\u672C: ${metadata.models.textModel}`);
+    if (models.length > 0) {
+      info.push(`**AI\u6A21\u578B**: ${models.join(" | ")}`);
+    }
+    content += info.join("\n") + "\n\n";
+    content += "---\n";
+    content += "*\u7531 GetNote \u63D2\u4EF6\u81EA\u52A8\u751F\u6210*\n\n";
+    return content;
+  }
+  /**
+   * 格式化多模态标题
+   */
+  formatMultimodalTitle(content) {
+    const dateStr = content.metadata.createdAt.toLocaleDateString("zh-CN", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).replace(/\//g, "-");
+    const timeStr = content.metadata.createdAt.toLocaleTimeString("zh-CN", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false
+    });
+    const typeLabels = [];
+    if (content.metadata.hasAudio)
+      typeLabels.push("\u8BED\u97F3");
+    if (content.metadata.hasImages)
+      typeLabels.push("\u56FE\u7247");
+    const typeLabel = typeLabels.length > 1 ? "\u591A\u6A21\u6001" : typeLabels[0] || "\u7B14\u8BB0";
+    return `${dateStr} ${timeStr} - ${typeLabel}\u7B14\u8BB0`;
+  }
+  /**
+   * 获取图片显示路径
+   */
+  getImageDisplayPath(image) {
+    if (image.vaultPath) {
+      return image.vaultPath;
+    }
+    return null;
   }
   /**
    * 合并结构化标签为扁平数组
@@ -913,6 +1326,145 @@ var NoteGenerator = class {
     return noteFileName.replace(".md", ".webm");
   }
   /**
+   * 保存图片文件到vault
+   */
+  async saveImageFile(image, folderPath, fileName) {
+    const imageFolderPath = `${folderPath}/images`;
+    await this.ensureFolderExists(imageFolderPath);
+    const imageFileName = fileName || this.generateImageFileName(image);
+    const fullImagePath = `${imageFolderPath}/${imageFileName}`;
+    const finalImagePath = await this.getUniqueFilePath(fullImagePath);
+    const arrayBuffer = await image.file.arrayBuffer();
+    const imageFile = await this.app.vault.createBinary(finalImagePath, arrayBuffer);
+    const relativePath = finalImagePath;
+    image.vaultPath = relativePath;
+    image.vaultFile = imageFile;
+    return { imageFile, imageFilePath: relativePath, relativePath };
+  }
+  /**
+   * 批量保存图片到vault
+   */
+  async saveImagesToVault(images, folderPath) {
+    const savedImages = [];
+    const errors = [];
+    for (const image of images) {
+      try {
+        const result = await this.saveImageFile(image, folderPath);
+        savedImages.push({
+          image,
+          file: result.imageFile,
+          path: result.imageFilePath
+        });
+        console.log(`\u4FDD\u5B58\u56FE\u7247\u6210\u529F: ${image.fileName} -> ${result.imageFilePath}`);
+      } catch (error) {
+        const errorMsg = `\u4FDD\u5B58\u56FE\u7247\u5931\u8D25: ${error.message}`;
+        errors.push({ image, error: errorMsg });
+        console.error(`\u4FDD\u5B58\u56FE\u7247\u5931\u8D25: ${image.fileName}`, error);
+      }
+    }
+    return { savedImages, errors };
+  }
+  /**
+   * 生成图片文件名
+   */
+  generateImageFileName(image) {
+    const extension = this.getImageFileExtension(image.fileType);
+    const timestamp = image.addedAt.getTime();
+    const baseName = image.fileName.replace(/\.[^/.]+$/, "");
+    const safeName = this.sanitizeFileName(baseName);
+    return `${timestamp}_${safeName}${extension}`;
+  }
+  /**
+   * 根据MIME类型获取文件扩展名
+   */
+  getImageFileExtension(mimeType) {
+    const extensions = {
+      "image/jpeg": ".jpg",
+      "image/jpg": ".jpg",
+      "image/png": ".png",
+      "image/gif": ".gif",
+      "image/webp": ".webp",
+      "image/bmp": ".bmp",
+      "image/tiff": ".tiff"
+    };
+    return extensions[mimeType.toLowerCase()] || ".jpg";
+  }
+  /**
+   * 清理文件名，移除不安全字符
+   */
+  sanitizeFileName(fileName) {
+    return fileName.replace(/[<>:"/\\|?*]/g, "_").replace(/\s+/g, "_").replace(/_{2,}/g, "_").replace(/^_|_$/g, "").slice(0, 50);
+  }
+  /**
+   * 生成多模态笔记并保存所有资源
+   */
+  async generateAndSaveMultimodalNote(multimodalContent, options, folderPath, fileName) {
+    const errors = [];
+    let savedImages = [];
+    let audioFile;
+    try {
+      if (multimodalContent.images && multimodalContent.images.items.length > 0) {
+        const imageResult = await this.saveImagesToVault(multimodalContent.images.items, folderPath);
+        savedImages = imageResult.savedImages;
+        if (imageResult.errors.length > 0) {
+          errors.push(...imageResult.errors.map((e) => e.error));
+        }
+      }
+      if (multimodalContent.audio && multimodalContent.audio.audioBlob) {
+        try {
+          const audioResult = await this.saveAudioFile(
+            multimodalContent.audio.audioBlob,
+            folderPath,
+            fileName.replace(".md", ".webm")
+          );
+          audioFile = audioResult.audioFile;
+          if (multimodalContent.audio) {
+            multimodalContent.audio.audioFilePath = audioResult.audioFilePath;
+          }
+        } catch (error) {
+          errors.push(`\u97F3\u9891\u4FDD\u5B58\u5931\u8D25: ${error.message}`);
+        }
+      }
+      const noteContent = this.generateMultimodalNoteContent(multimodalContent, options);
+      const noteFile = await this.saveNote(noteContent, folderPath, fileName);
+      return {
+        noteFile,
+        savedImages,
+        audioFile,
+        errors
+      };
+    } catch (error) {
+      errors.push(`\u7B14\u8BB0\u751F\u6210\u5931\u8D25: ${error.message}`);
+      throw new Error(`\u591A\u6A21\u6001\u7B14\u8BB0\u4FDD\u5B58\u5931\u8D25: ${errors.join(", ")}`);
+    }
+  }
+  /**
+   * 创建默认的笔记生成选项
+   */
+  createDefaultNoteOptions(settings) {
+    return {
+      includeAudioSection: true,
+      includeOCRSection: settings.includeOCRInNote,
+      includeImageSection: settings.showOriginalImages,
+      includeSummarySection: settings.combineAudioAndOCR,
+      includeMetadata: settings.includeMetadata,
+      audioOptions: {
+        includeOriginalAudio: settings.keepOriginalAudio,
+        showTranscription: true
+      },
+      imageOptions: {
+        includeOriginalImages: settings.showOriginalImages,
+        showOCRText: settings.includeOCRInNote,
+        thumbnailSize: "medium"
+      },
+      summaryOptions: {
+        generateTags: true,
+        generateSummary: true,
+        combineAudioAndOCR: settings.combineAudioAndOCR
+      }
+    };
+  }
+  /**
    * 检查是否支持保存二进制文件
    */
   static isAudioSaveSupported() {
@@ -1218,6 +1770,250 @@ ${text}`;
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
   /**
+   * 处理多模态内容 - 新的主要入口点
+   * @param multimodalContent 包含音频和图片信息的多模态内容
+   * @returns 多模态处理结果
+   */
+  async processMultimodalContent(multimodalContent) {
+    var _a, _b;
+    const startTime = Date.now();
+    const audioText = ((_a = multimodalContent.audio) == null ? void 0 : _a.transcribedText) || "";
+    const ocrText = ((_b = multimodalContent.images) == null ? void 0 : _b.totalOCRText) || "";
+    const combinedText = multimodalContent.combinedText || this.combineAudioAndOCRText(audioText, ocrText);
+    const audioOnly = !!audioText && !ocrText;
+    const imageOnly = !audioText && !!ocrText;
+    const multimodal = !!audioText && !!ocrText;
+    if (!this.settings.enableLLMProcessing) {
+      return {
+        audioText,
+        ocrText,
+        combinedText,
+        processedText: combinedText,
+        summary: combinedText,
+        tags: [],
+        structuredTags: { people: [], events: [], topics: [], times: [], locations: [] },
+        smartTitle: this.generateBasicTitle(combinedText),
+        isProcessed: false,
+        audioOnly,
+        imageOnly,
+        multimodal,
+        processingTime: `${Date.now() - startTime}ms`
+      };
+    }
+    try {
+      console.log("\u5F00\u59CB\u591A\u6A21\u6001\u5185\u5BB9\u5904\u7406...");
+      let processedText;
+      let tags;
+      let structuredTags;
+      let summary;
+      let smartTitle;
+      if (multimodal) {
+        const [basicResult, structuredTagsResult, summaryResult, titleResult] = await Promise.all([
+          this.processMultimodalTextWithLLM(audioText, ocrText, combinedText),
+          this.generateStructuredTags(combinedText),
+          this.generateContentSummary(combinedText),
+          this.generateSmartTitle(combinedText)
+        ]);
+        processedText = basicResult.processedText;
+        tags = basicResult.tags;
+        structuredTags = structuredTagsResult;
+        summary = summaryResult;
+        smartTitle = titleResult;
+      } else {
+        const textToProcess = audioText || ocrText;
+        const [basicResult, structuredTagsResult, summaryResult, titleResult] = await Promise.all([
+          this.processWithRetry(textToProcess),
+          this.generateStructuredTags(textToProcess),
+          this.generateContentSummary(textToProcess),
+          this.generateSmartTitle(textToProcess)
+        ]);
+        processedText = basicResult.processedText;
+        tags = basicResult.tags;
+        structuredTags = structuredTagsResult;
+        summary = summaryResult;
+        smartTitle = titleResult;
+      }
+      return {
+        audioText,
+        ocrText,
+        combinedText,
+        processedText,
+        summary,
+        tags,
+        structuredTags,
+        smartTitle,
+        isProcessed: true,
+        audioOnly,
+        imageOnly,
+        multimodal,
+        processingTime: `${Date.now() - startTime}ms`
+      };
+    } catch (error) {
+      console.error("\u591A\u6A21\u6001\u5185\u5BB9\u5904\u7406\u5931\u8D25:", error);
+      try {
+        const basicResult = await this.processWithRetry(combinedText);
+        return {
+          audioText,
+          ocrText,
+          combinedText,
+          processedText: basicResult.processedText,
+          summary: combinedText.length > 200 ? combinedText.substring(0, 200) + "..." : combinedText,
+          tags: basicResult.tags,
+          structuredTags: { people: [], events: [], topics: [], times: [], locations: [] },
+          smartTitle: this.generateBasicTitle(combinedText),
+          isProcessed: true,
+          audioOnly,
+          imageOnly,
+          multimodal,
+          processingTime: `${Date.now() - startTime}ms`
+        };
+      } catch (basicError) {
+        console.error("\u57FA\u7840\u5904\u7406\u4E5F\u5931\u8D25\uFF0C\u8FD4\u56DE\u539F\u59CB\u5185\u5BB9:", basicError);
+        return {
+          audioText,
+          ocrText,
+          combinedText,
+          processedText: combinedText,
+          summary: combinedText,
+          tags: [],
+          structuredTags: { people: [], events: [], topics: [], times: [], locations: [] },
+          smartTitle: this.generateBasicTitle(combinedText),
+          isProcessed: false,
+          audioOnly,
+          imageOnly,
+          multimodal,
+          processingTime: `${Date.now() - startTime}ms`
+        };
+      }
+    }
+  }
+  /**
+   * 多模态文本LLM处理
+   */
+  async processMultimodalTextWithLLM(audioText, ocrText, combinedText) {
+    const prompt = `\u8BF7\u5904\u7406\u4EE5\u4E0B\u591A\u6A21\u6001\u5185\u5BB9\uFF0C\u5305\u542B\u8BED\u97F3\u8F6C\u5F55\u6587\u5B57\u548C\u56FE\u7247OCR\u8BC6\u522B\u6587\u5B57\uFF1A
+
+\u8BED\u97F3\u8F6C\u5F55\u5185\u5BB9\uFF1A
+${audioText}
+
+\u56FE\u7247OCR\u8BC6\u522B\u5185\u5BB9\uFF1A
+${ocrText}
+
+\u8BF7\u6309\u4EE5\u4E0B\u8981\u6C42\u5904\u7406\uFF1A
+1. \u6574\u5408\u8BED\u97F3\u548C\u56FE\u7247\u4FE1\u606F\uFF0C\u751F\u6210\u8FDE\u8D2F\u7684\u6587\u5B57\u5185\u5BB9
+2. \u4FEE\u6B63\u8BED\u97F3\u8F6C\u5F55\u4E2D\u7684\u8BED\u6CD5\u9519\u8BEF\u548C\u53E3\u8BED\u5316\u8868\u8FBE
+3. \u7ED3\u5408\u56FE\u7247\u6587\u5B57\u4FE1\u606F\uFF0C\u8865\u5145\u548C\u5B8C\u5584\u5185\u5BB9\u63CF\u8FF0
+4. \u751F\u6210\u76F8\u5173\u7684\u4E3B\u9898\u6807\u7B7E\uFF08\u7528\u9017\u53F7\u5206\u9694\uFF09
+5. \u4FDD\u6301\u539F\u610F\u4E0D\u53D8\uFF0C\u8BED\u8A00\u81EA\u7136\u6D41\u7545
+
+\u76F4\u63A5\u8FD4\u56DE\u5904\u7406\u540E\u7684\u6587\u5B57\u5185\u5BB9\uFF0C\u7136\u540E\u6362\u884C\u8FD4\u56DE\u6807\u7B7E\uFF08\u683C\u5F0F\uFF1A\u6807\u7B7E\uFF1Atag1,tag2,tag3\uFF09`;
+    return await this.client.processTextWithLLM(prompt, this.settings.textModel);
+  }
+  /**
+   * 合并音频和OCR文字
+   */
+  combineAudioAndOCRText(audioText, ocrText) {
+    const parts = [];
+    if (audioText && audioText.trim()) {
+      parts.push("\u3010\u8BED\u97F3\u5185\u5BB9\u3011\n" + audioText.trim());
+    }
+    if (ocrText && ocrText.trim()) {
+      parts.push("\u3010\u56FE\u7247\u6587\u5B57\u3011\n" + ocrText.trim());
+    }
+    return parts.join("\n\n");
+  }
+  /**
+   * 处理OCR文本项列表
+   */
+  async processOCRTextItems(ocrItems) {
+    if (!ocrItems || ocrItems.length === 0) {
+      return {
+        combinedText: "",
+        processedText: "",
+        tags: [],
+        isProcessed: false
+      };
+    }
+    const combinedOCRText = ocrItems.map((item) => `\u3010${item.fileName}\u3011
+${item.text}`).join("\n\n");
+    if (!this.settings.enableLLMProcessing) {
+      return {
+        combinedText: combinedOCRText,
+        processedText: combinedOCRText,
+        tags: [],
+        isProcessed: false
+      };
+    }
+    try {
+      const result = await this.processWithRetry(combinedOCRText);
+      return {
+        combinedText: combinedOCRText,
+        processedText: result.processedText,
+        tags: result.tags,
+        isProcessed: true
+      };
+    } catch (error) {
+      console.error("OCR\u6587\u672C\u5904\u7406\u5931\u8D25:", error);
+      return {
+        combinedText: combinedOCRText,
+        processedText: combinedOCRText,
+        tags: [],
+        isProcessed: false
+      };
+    }
+  }
+  /**
+   * 验证多模态内容
+   */
+  validateMultimodalContent(content) {
+    var _a, _b;
+    const hasAudio = ((_a = content.audio) == null ? void 0 : _a.transcribedText) && content.audio.transcribedText.trim().length > 0;
+    const hasImages = ((_b = content.images) == null ? void 0 : _b.totalOCRText) && content.images.totalOCRText.trim().length > 0;
+    if (!hasAudio && !hasImages) {
+      return { valid: false, reason: "\u6CA1\u6709\u97F3\u9891\u6216\u56FE\u7247\u5185\u5BB9" };
+    }
+    const combinedLength = content.combinedText.length;
+    if (combinedLength < 10) {
+      return { valid: false, reason: "\u5185\u5BB9\u8FC7\u77ED\uFF0C\u4E0D\u9700\u8981\u5904\u7406" };
+    }
+    if (combinedLength > 15e3) {
+      return { valid: false, reason: "\u5185\u5BB9\u8FC7\u957F\uFF0C\u8D85\u51FA\u5904\u7406\u9650\u5236" };
+    }
+    return { valid: true };
+  }
+  /**
+   * 生成多模态处理摘要
+   */
+  generateMultimodalProcessingSummary(result) {
+    const lines = [];
+    if (result.multimodal) {
+      lines.push("\u{1F3AF} \u591A\u6A21\u6001\u5185\u5BB9 (\u97F3\u9891 + \u56FE\u7247)");
+    } else if (result.audioOnly) {
+      lines.push("\u{1F399}\uFE0F \u7EAF\u97F3\u9891\u5185\u5BB9");
+    } else if (result.imageOnly) {
+      lines.push("\u{1F5BC}\uFE0F \u7EAF\u56FE\u7247\u5185\u5BB9");
+    }
+    if (result.isProcessed) {
+      lines.push("\u2705 \u5185\u5BB9\u5DF2\u901A\u8FC7AI\u5904\u7406\u4F18\u5316");
+      if (result.audioText) {
+        lines.push(`\u{1F4CA} \u97F3\u9891\u6587\u5B57: ${result.audioText.length}\u5B57\u7B26`);
+      }
+      if (result.ocrText) {
+        lines.push(`\u{1F4CA} \u56FE\u7247\u6587\u5B57: ${result.ocrText.length}\u5B57\u7B26`);
+      }
+      lines.push(`\u{1F4CA} \u5904\u7406\u540E\u957F\u5EA6: ${result.processedText.length}\u5B57\u7B26`);
+      if (result.tags.length > 0) {
+        lines.push(`\u{1F3F7}\uFE0F \u751F\u6210\u6807\u7B7E: ${result.tags.length}\u4E2A`);
+      }
+    } else {
+      lines.push("\u{1F4DD} \u4F7F\u7528\u539F\u59CB\u5185\u5BB9");
+    }
+    if (result.processingTime) {
+      lines.push(`\u23F1\uFE0F \u5904\u7406\u65F6\u95F4: ${result.processingTime}`);
+    }
+    return lines.join("\n");
+  }
+  /**
    * 格式化标签为Obsidian格式
    */
   formatTagsForObsidian(tags) {
@@ -1264,13 +2060,22 @@ var DEFAULT_SETTINGS = {
   generateTags: true,
   maxRetries: 2,
   // 音频保留默认设置
-  keepOriginalAudio: false
+  keepOriginalAudio: false,
+  // OCR图片处理默认设置
+  enableImageOCR: false,
+  ocrModel: "qwen-vl-ocr-latest",
+  includeOCRInNote: true,
+  showOriginalImages: true,
+  combineAudioAndOCR: true,
+  maxImageSize: 10
+  // 10MB
 };
 var GetNoteSettingTab = class extends import_obsidian2.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.apiTestResult = null;
     this.textLLMTestResult = null;
+    this.ocrTestResult = null;
     this.plugin = plugin;
   }
   display() {
@@ -1279,6 +2084,7 @@ var GetNoteSettingTab = class extends import_obsidian2.PluginSettingTab {
     containerEl.createEl("h2", { text: "GetNote \u63D2\u4EF6\u8BBE\u7F6E" });
     this.createApiSettings(containerEl);
     this.createLLMSettings(containerEl);
+    this.createOCRSettings(containerEl);
     this.createRecordingSettings(containerEl);
     this.createOutputSettings(containerEl);
     this.createTemplateSettings(containerEl);
@@ -1334,6 +2140,44 @@ var GetNoteSettingTab = class extends import_obsidian2.PluginSettingTab {
         await this.testTextLLM(button.buttonEl);
       }));
       this.textLLMTestResult = textLLMTestSetting.settingEl.createDiv("text-llm-test-result");
+    }
+  }
+  createOCRSettings(containerEl) {
+    containerEl.createEl("h3", { text: "\u{1F50D} OCR\u56FE\u7247\u8BC6\u522B\u8BBE\u7F6E" });
+    new import_obsidian2.Setting(containerEl).setName("\u542F\u7528\u56FE\u7247OCR\u8BC6\u522B").setDesc("\u4F7F\u7528AI\u6A21\u578B\u8BC6\u522B\u56FE\u7247\u4E2D\u7684\u6587\u5B57\u5185\u5BB9\uFF0C\u652F\u6301\u4E0E\u8BED\u97F3\u7B14\u8BB0\u7ED3\u5408").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableImageOCR).onChange(async (value) => {
+      this.plugin.settings.enableImageOCR = value;
+      await this.plugin.saveSettings();
+      this.display();
+    }));
+    if (this.plugin.settings.enableImageOCR) {
+      new import_obsidian2.Setting(containerEl).setName("OCR\u8BC6\u522B\u6A21\u578B").setDesc("\u9009\u62E9\u7528\u4E8E\u56FE\u7247\u6587\u5B57\u8BC6\u522B\u7684AI\u6A21\u578B").addDropdown((dropdown) => dropdown.addOption("qwen-vl-ocr-latest", "Qwen VL OCR Latest (\u63A8\u8350)").addOption("qwen-vl-ocr", "Qwen VL OCR (\u6807\u51C6\u7248)").setValue(this.plugin.settings.ocrModel).onChange(async (value) => {
+        this.plugin.settings.ocrModel = value;
+        await this.plugin.saveSettings();
+        if (this.ocrTestResult) {
+          this.ocrTestResult.empty();
+        }
+      }));
+      new import_obsidian2.Setting(containerEl).setName("OCR\u5185\u5BB9\u663E\u793A").setDesc("\u5728\u751F\u6210\u7684\u7B14\u8BB0\u4E2D\u663E\u793AOCR\u8BC6\u522B\u7684\u6587\u5B57\u5185\u5BB9").addToggle((toggle) => toggle.setValue(this.plugin.settings.includeOCRInNote).onChange(async (value) => {
+        this.plugin.settings.includeOCRInNote = value;
+        await this.plugin.saveSettings();
+      }));
+      new import_obsidian2.Setting(containerEl).setName("\u663E\u793A\u539F\u59CB\u56FE\u7247").setDesc("\u5728\u7B14\u8BB0\u4E2D\u663E\u793A\u539F\u59CB\u56FE\u7247\u6587\u4EF6").addToggle((toggle) => toggle.setValue(this.plugin.settings.showOriginalImages).onChange(async (value) => {
+        this.plugin.settings.showOriginalImages = value;
+        await this.plugin.saveSettings();
+      }));
+      new import_obsidian2.Setting(containerEl).setName("\u97F3\u9891\u4E0EOCR\u6587\u5B57\u5408\u5E76").setDesc("\u5C06\u8BED\u97F3\u8F6C\u5F55\u6587\u5B57\u548COCR\u8BC6\u522B\u6587\u5B57\u5408\u5E76\u540E\u4E00\u8D77\u53D1\u9001\u7ED9AI\u8FDB\u884C\u5904\u7406").addToggle((toggle) => toggle.setValue(this.plugin.settings.combineAudioAndOCR).onChange(async (value) => {
+        this.plugin.settings.combineAudioAndOCR = value;
+        await this.plugin.saveSettings();
+      }));
+      new import_obsidian2.Setting(containerEl).setName("\u56FE\u7247\u5927\u5C0F\u9650\u5236").setDesc("\u5355\u5F20\u56FE\u7247\u7684\u6700\u5927\u6587\u4EF6\u5927\u5C0F\uFF08MB\uFF09").addText((text) => text.setPlaceholder("10").setValue(this.plugin.settings.maxImageSize.toString()).onChange(async (value) => {
+        const size = parseInt(value) || 10;
+        this.plugin.settings.maxImageSize = Math.max(1, Math.min(50, size));
+        await this.plugin.saveSettings();
+      }));
+      const ocrTestSetting = new import_obsidian2.Setting(containerEl).setName("OCR\u529F\u80FD\u6D4B\u8BD5").setDesc("\u6D4B\u8BD5OCR\u56FE\u7247\u8BC6\u522B\u529F\u80FD\u662F\u5426\u6B63\u5E38\u5DE5\u4F5C").addButton((button) => button.setButtonText("\u6D4B\u8BD5OCR").setCta().onClick(async () => {
+        await this.testOCR(button.buttonEl);
+      }));
+      this.ocrTestResult = ocrTestSetting.settingEl.createDiv("ocr-test-result");
     }
   }
   createRecordingSettings(containerEl) {
@@ -1462,6 +2306,34 @@ var GetNoteSettingTab = class extends import_obsidian2.PluginSettingTab {
       buttonEl.disabled = false;
     }
   }
+  async testOCR(buttonEl) {
+    if (!this.plugin.settings.apiKey.trim()) {
+      this.showOCRTestResult("\u8BF7\u5148\u8F93\u5165API Key", "error");
+      return;
+    }
+    buttonEl.setText("\u6D4B\u8BD5\u4E2D...");
+    buttonEl.disabled = true;
+    try {
+      console.log("\u5F00\u59CBOCR\u529F\u80FD\u6D4B\u8BD5\uFF0C\u6A21\u578B:", this.plugin.settings.ocrModel);
+      const client = new DashScopeClient(this.plugin.settings.apiKey);
+      const result = await client.testOCR();
+      if (result.success) {
+        this.showOCRTestResult("\u2705 OCR\u529F\u80FD\u6D4B\u8BD5\u6210\u529F\uFF01", "success");
+        console.log("OCR\u6D4B\u8BD5\u6210\u529F");
+      } else {
+        const errorMsg = result.error || "\u672A\u77E5\u9519\u8BEF";
+        this.showOCRTestResult(`\u274C OCR\u529F\u80FD\u6D4B\u8BD5\u5931\u8D25: ${errorMsg}`, "error");
+        console.error("OCR\u6D4B\u8BD5\u5931\u8D25:", errorMsg);
+      }
+    } catch (error) {
+      const errorMsg = `OCR\u6D4B\u8BD5\u5F02\u5E38: ${error.message}`;
+      this.showOCRTestResult(`\u274C ${errorMsg}`, "error");
+      console.error("OCR\u6D4B\u8BD5\u5F02\u5E38:", error);
+    } finally {
+      buttonEl.setText("\u6D4B\u8BD5OCR");
+      buttonEl.disabled = false;
+    }
+  }
   showTestResult(message, type) {
     if (this.apiTestResult) {
       this.apiTestResult.empty();
@@ -1492,6 +2364,21 @@ var GetNoteSettingTab = class extends import_obsidian2.PluginSettingTab {
       resultEl.style.fontSize = "14px";
     }
   }
+  showOCRTestResult(message, type) {
+    if (this.ocrTestResult) {
+      this.ocrTestResult.empty();
+      const resultEl = this.ocrTestResult.createDiv();
+      resultEl.setText(message);
+      resultEl.addClass(`test-result-${type}`);
+      if (type === "success") {
+        resultEl.style.color = "#10b981";
+      } else {
+        resultEl.style.color = "#ef4444";
+      }
+      resultEl.style.marginTop = "8px";
+      resultEl.style.fontSize = "14px";
+    }
+  }
   exportSettings() {
     const settingsData = JSON.stringify(this.plugin.settings, null, 2);
     const blob = new Blob([settingsData], { type: "application/json" });
@@ -1507,8 +2394,627 @@ var GetNoteSettingTab = class extends import_obsidian2.PluginSettingTab {
 
 // src/recording-modal.ts
 var import_obsidian3 = require("obsidian");
+
+// src/image-manager.ts
+var ImageManager = class {
+  // 30秒超时
+  constructor() {
+    this.images = /* @__PURE__ */ new Map();
+    this.maxFileSize = 10 * 1024 * 1024;
+    // 10MB
+    this.maxImageCount = 20;
+    // 最大图片数量
+    this.supportedFormats = ["image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp"];
+    this.thumbnailSize = 120;
+    // 缩略图大小
+    this.processingTimeout = 3e4;
+  }
+  /**
+   * 添加图片文件 - 增强版本，支持详细错误报告
+   */
+  async addImages(files) {
+    const successful = [];
+    const failed = [];
+    const fileArray = Array.from(files);
+    const preCheckResults = this.preCheckFiles(fileArray);
+    if (preCheckResults.length > 0) {
+      failed.push(...preCheckResults);
+    }
+    const validFiles = fileArray.filter(
+      (file) => !preCheckResults.find((error) => error.fileName === file.name)
+    );
+    const batchSize = 5;
+    for (let i = 0; i < validFiles.length; i += batchSize) {
+      const batch = validFiles.slice(i, i + batchSize);
+      const batchPromises = batch.map((file) => this.processImageWithTimeout(file));
+      const batchResults = await Promise.allSettled(batchPromises);
+      batchResults.forEach((result, index) => {
+        const file = batch[index];
+        if (result.status === "fulfilled" && result.value.success) {
+          this.images.set(result.value.imageItem.id, result.value.imageItem);
+          successful.push(result.value.imageItem);
+          console.log(`\u6DFB\u52A0\u56FE\u7247\u6210\u529F: ${file.name}, \u5927\u5C0F: ${this.formatFileSize(file.size)}`);
+        } else {
+          const error = result.status === "fulfilled" ? result.value.error : result.reason;
+          failed.push(this.createProcessingError(file, "processing", error));
+          console.error(`\u6DFB\u52A0\u56FE\u7247\u5931\u8D25: ${file.name}`, error);
+        }
+      });
+    }
+    const totalProcessed = successful.length + failed.length;
+    const successRate = totalProcessed > 0 ? successful.length / totalProcessed * 100 : 0;
+    return {
+      successful,
+      failed,
+      totalProcessed,
+      successRate
+    };
+  }
+  /**
+   * 向后兼容的添加图片方法
+   */
+  async addImagesLegacy(files) {
+    const result = await this.addImages(files);
+    return {
+      added: result.successful,
+      errors: result.failed.map((error) => `${error.fileName}: ${error.errorMessage}`)
+    };
+  }
+  /**
+   * 为了保持兼容性，保留原来的返回格式
+   */
+  async addImagesCompat(files) {
+    return this.addImagesLegacy(files);
+  }
+  /**
+   * 删除图片
+   */
+  removeImage(imageId) {
+    const existed = this.images.has(imageId);
+    this.images.delete(imageId);
+    if (existed) {
+      console.log(`\u5220\u9664\u56FE\u7247: ${imageId}`);
+    }
+    return existed;
+  }
+  /**
+   * 获取所有图片
+   */
+  getAllImages() {
+    return Array.from(this.images.values()).sort(
+      (a, b) => a.addedAt.getTime() - b.addedAt.getTime()
+    );
+  }
+  /**
+   * 获取图片数量
+   */
+  getImageCount() {
+    return this.images.size;
+  }
+  /**
+   * 获取指定图片
+   */
+  getImage(imageId) {
+    return this.images.get(imageId);
+  }
+  /**
+   * 清空所有图片
+   */
+  clearAllImages() {
+    console.log(`\u6E05\u7A7A\u6240\u6709\u56FE\u7247, \u5171${this.images.size}\u5F20`);
+    this.images.clear();
+  }
+  /**
+   * 验证图片文件 - 增强版本
+   */
+  validateImage(file) {
+    if (!this.supportedFormats.includes(file.type)) {
+      return {
+        valid: false,
+        error: `\u4E0D\u652F\u6301\u7684\u56FE\u7247\u683C\u5F0F "${file.type}"\uFF0C\u652F\u6301\u683C\u5F0F: ${this.supportedFormats.join(", ")}`
+      };
+    }
+    if (file.size === 0) {
+      return {
+        valid: false,
+        error: "\u6587\u4EF6\u4E3A\u7A7A\uFF0C\u8BF7\u9009\u62E9\u6709\u6548\u7684\u56FE\u7247\u6587\u4EF6"
+      };
+    }
+    if (file.size > this.maxFileSize) {
+      return {
+        valid: false,
+        error: `\u6587\u4EF6\u8FC7\u5927 (${this.formatFileSize(file.size)})\uFF0C\u6700\u5927\u652F\u6301 ${this.formatFileSize(this.maxFileSize)}`
+      };
+    }
+    if (!file.name || file.name.trim().length === 0) {
+      return {
+        valid: false,
+        error: "\u6587\u4EF6\u540D\u65E0\u6548\u6216\u4E3A\u7A7A"
+      };
+    }
+    if (file.name.length > 255) {
+      return {
+        valid: false,
+        error: "\u6587\u4EF6\u540D\u8FC7\u957F\uFF0C\u8BF7\u91CD\u547D\u540D\u540E\u91CD\u8BD5"
+      };
+    }
+    const dangerousChars = /[<>:"/\\|?*\x00-\x1f]/;
+    if (dangerousChars.test(file.name)) {
+      return {
+        valid: false,
+        error: "\u6587\u4EF6\u540D\u5305\u542B\u4E0D\u5B89\u5168\u5B57\u7B26\uFF0C\u8BF7\u91CD\u547D\u540D\u540E\u91CD\u8BD5"
+      };
+    }
+    return { valid: true };
+  }
+  /**
+   * 预检查文件列表
+   */
+  preCheckFiles(files) {
+    const errors = [];
+    const currentCount = this.images.size;
+    const newCount = files.length;
+    const totalCount = currentCount + newCount;
+    if (totalCount > this.maxImageCount) {
+      const allowedNew = this.maxImageCount - currentCount;
+      if (allowedNew <= 0) {
+        errors.push({
+          fileName: "\u6240\u6709\u6587\u4EF6",
+          errorType: "validation",
+          errorMessage: `\u5DF2\u8FBE\u5230\u6700\u5927\u56FE\u7247\u6570\u91CF\u9650\u5236 (${this.maxImageCount}\u5F20)`,
+          timestamp: new Date(),
+          recoverable: false,
+          suggestedAction: "\u8BF7\u5220\u9664\u4E00\u4E9B\u73B0\u6709\u56FE\u7247\u540E\u91CD\u8BD5"
+        });
+        return errors;
+      } else {
+        errors.push({
+          fileName: "\u90E8\u5206\u6587\u4EF6",
+          errorType: "validation",
+          errorMessage: `\u53EA\u80FD\u518D\u6DFB\u52A0 ${allowedNew} \u5F20\u56FE\u7247 (\u5F53\u524D\u9650\u5236: ${this.maxImageCount}\u5F20)`,
+          timestamp: new Date(),
+          recoverable: true,
+          suggestedAction: `\u5C06\u53EA\u5904\u7406\u524D ${allowedNew} \u5F20\u56FE\u7247`
+        });
+      }
+    }
+    const totalSize = files.reduce((sum, file) => sum + file.size, 0);
+    const maxTotalSize = this.maxFileSize * 5;
+    if (totalSize > maxTotalSize) {
+      errors.push({
+        fileName: "\u6279\u91CF\u6587\u4EF6",
+        errorType: "validation",
+        errorMessage: `\u6279\u91CF\u6587\u4EF6\u603B\u5927\u5C0F\u8FC7\u5927 (${this.formatFileSize(totalSize)})\uFF0C\u5EFA\u8BAE\u5206\u6279\u4E0A\u4F20`,
+        timestamp: new Date(),
+        recoverable: true,
+        suggestedAction: "\u5EFA\u8BAE\u6BCF\u6B21\u4E0A\u4F20\u4E0D\u8D85\u8FC75\u5F20\u56FE\u7247"
+      });
+    }
+    const existingNames = new Set(this.getAllImages().map((img) => img.fileName));
+    const duplicates = files.filter((file) => existingNames.has(file.name));
+    duplicates.forEach((file) => {
+      errors.push({
+        fileName: file.name,
+        errorType: "validation",
+        errorMessage: "\u6587\u4EF6\u540D\u5DF2\u5B58\u5728",
+        timestamp: new Date(),
+        recoverable: true,
+        suggestedAction: "\u91CD\u547D\u540D\u6587\u4EF6\u540E\u91CD\u8BD5"
+      });
+    });
+    return errors;
+  }
+  /**
+   * 带超时的图片处理
+   */
+  async processImageWithTimeout(file) {
+    return new Promise(async (resolve) => {
+      const timeoutId = setTimeout(() => {
+        resolve({
+          success: false,
+          error: new Error(`\u5904\u7406\u8D85\u65F6 (${this.processingTimeout / 1e3}\u79D2)`)
+        });
+      }, this.processingTimeout);
+      try {
+        const validation = this.validateImage(file);
+        if (!validation.valid) {
+          clearTimeout(timeoutId);
+          resolve({
+            success: false,
+            error: new Error(validation.error)
+          });
+          return;
+        }
+        const imageItem = await this.createImageItem(file);
+        clearTimeout(timeoutId);
+        resolve({
+          success: true,
+          imageItem
+        });
+      } catch (error) {
+        clearTimeout(timeoutId);
+        resolve({
+          success: false,
+          error: error instanceof Error ? error : new Error(String(error))
+        });
+      }
+    });
+  }
+  /**
+   * 创建处理错误对象
+   */
+  createProcessingError(file, errorType, error, imageId) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    let suggestedAction = "";
+    let recoverable = true;
+    switch (errorType) {
+      case "validation":
+        recoverable = false;
+        suggestedAction = "\u8BF7\u68C0\u67E5\u6587\u4EF6\u683C\u5F0F\u3001\u5927\u5C0F\u548C\u6587\u4EF6\u540D";
+        break;
+      case "timeout":
+        suggestedAction = "\u7F51\u7EDC\u8F83\u6162\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u6216\u68C0\u67E5\u7F51\u7EDC\u8FDE\u63A5";
+        break;
+      case "network":
+        suggestedAction = "\u8BF7\u68C0\u67E5\u7F51\u7EDC\u8FDE\u63A5\u540E\u91CD\u8BD5";
+        break;
+      case "processing":
+        suggestedAction = "\u6587\u4EF6\u53EF\u80FD\u5DF2\u635F\u574F\uFF0C\u8BF7\u5C1D\u8BD5\u5176\u4ED6\u56FE\u7247";
+        recoverable = false;
+        break;
+      case "save":
+        suggestedAction = "\u68C0\u67E5\u5B58\u50A8\u7A7A\u95F4\u548C\u6587\u4EF6\u6743\u9650";
+        break;
+      default:
+        suggestedAction = "\u8BF7\u7A0D\u540E\u91CD\u8BD5\u6216\u8054\u7CFB\u6280\u672F\u652F\u6301";
+    }
+    return {
+      imageId,
+      fileName: file.name,
+      errorType,
+      errorMessage,
+      originalError: error instanceof Error ? error : void 0,
+      timestamp: new Date(),
+      recoverable,
+      suggestedAction
+    };
+  }
+  /**
+   * 创建图片项
+   */
+  async createImageItem(file) {
+    const id = this.generateImageId();
+    const originalDataUrl = await this.fileToDataUrl(file);
+    const thumbnailDataUrl = await this.generateThumbnail(file);
+    return {
+      id,
+      file,
+      thumbnailDataUrl,
+      originalDataUrl,
+      fileName: file.name,
+      fileSize: file.size,
+      fileType: file.type,
+      addedAt: new Date()
+    };
+  }
+  /**
+   * 生成图片ID
+   */
+  generateImageId() {
+    return `img_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  }
+  /**
+   * 将文件转换为Data URL
+   */
+  fileToDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+  /**
+   * 生成缩略图
+   */
+  async generateThumbnail(file) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const canvas = document.createElement("canvas");
+          const ctx = canvas.getContext("2d");
+          if (!ctx) {
+            reject(new Error("\u65E0\u6CD5\u521B\u5EFACanvas\u4E0A\u4E0B\u6587"));
+            return;
+          }
+          const { width, height } = this.calculateThumbnailSize(
+            img.width,
+            img.height,
+            this.thumbnailSize
+          );
+          canvas.width = width;
+          canvas.height = height;
+          ctx.drawImage(img, 0, 0, width, height);
+          const thumbnailDataUrl = canvas.toDataURL("image/jpeg", 0.8);
+          resolve(thumbnailDataUrl);
+        } catch (error) {
+          reject(error);
+        }
+      };
+      img.onerror = () => reject(new Error("\u56FE\u7247\u52A0\u8F7D\u5931\u8D25"));
+      img.src = URL.createObjectURL(file);
+    });
+  }
+  /**
+   * 计算缩略图尺寸
+   */
+  calculateThumbnailSize(originalWidth, originalHeight, maxSize) {
+    let width = originalWidth;
+    let height = originalHeight;
+    if (width > height) {
+      if (width > maxSize) {
+        height = height * maxSize / width;
+        width = maxSize;
+      }
+    } else {
+      if (height > maxSize) {
+        width = width * maxSize / height;
+        height = maxSize;
+      }
+    }
+    return { width: Math.round(width), height: Math.round(height) };
+  }
+  /**
+   * 格式化文件大小
+   */
+  formatFileSize(bytes) {
+    if (bytes === 0)
+      return "0 B";
+    const k = 1024;
+    const sizes = ["B", "KB", "MB", "GB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+  }
+  /**
+   * 获取总文件大小
+   */
+  getTotalFileSize() {
+    return Array.from(this.images.values()).reduce((total, item) => total + item.fileSize, 0);
+  }
+  /**
+   * 获取支持的图片格式
+   */
+  getSupportedFormats() {
+    return [...this.supportedFormats];
+  }
+  /**
+   * 获取最大文件大小限制
+   */
+  getMaxFileSize() {
+    return this.maxFileSize;
+  }
+  /**
+   * 检查是否支持指定格式
+   */
+  isFormatSupported(mimeType) {
+    return this.supportedFormats.includes(mimeType);
+  }
+  /**
+   * 创建文件输入元素
+   */
+  createFileInput() {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = this.supportedFormats.join(",");
+    input.multiple = true;
+    input.style.display = "none";
+    return input;
+  }
+  /**
+   * 处理拖拽文件
+   */
+  async handleDroppedFiles(event) {
+    var _a;
+    event.preventDefault();
+    const files = (_a = event.dataTransfer) == null ? void 0 : _a.files;
+    if (!files || files.length === 0) {
+      return { added: [], errors: ["\u6CA1\u6709\u68C0\u6D4B\u5230\u6587\u4EF6"] };
+    }
+    return await this.addImagesLegacy(files);
+  }
+  /**
+   * 批量转换为Base64 (用于API调用)
+   */
+  async getImagesAsBase64() {
+    const result = [];
+    for (const item of this.getAllImages()) {
+      try {
+        const base64 = item.originalDataUrl.split(",")[1];
+        result.push({
+          id: item.id,
+          fileName: item.fileName,
+          base64,
+          mimeType: item.fileType
+        });
+      } catch (error) {
+        console.error(`\u8F6C\u6362\u56FE\u7247${item.fileName}\u4E3ABase64\u5931\u8D25:`, error);
+      }
+    }
+    return result;
+  }
+  /**
+   * 导出图片信息摘要
+   */
+  getImagesSummary() {
+    const images = this.getAllImages();
+    const formats = [...new Set(images.map((img) => img.fileType))];
+    return {
+      count: images.length,
+      totalSize: this.formatFileSize(this.getTotalFileSize()),
+      formats,
+      fileNames: images.map((img) => img.fileName)
+    };
+  }
+  /**
+   * 检查是否为空
+   */
+  isEmpty() {
+    return this.images.size === 0;
+  }
+  /**
+   * 检查浏览器兼容性
+   */
+  static isSupported() {
+    return !!(window.File && window.FileReader && window.FileList && window.Blob && document.createElement("canvas").getContext);
+  }
+  /**
+   * 获取验证限制信息
+   */
+  getValidationLimits() {
+    const currentCount = this.images.size;
+    return {
+      maxFileSize: this.maxFileSize,
+      maxImageCount: this.maxImageCount,
+      supportedFormats: [...this.supportedFormats],
+      processingTimeout: this.processingTimeout,
+      currentImageCount: currentCount,
+      remainingSlots: Math.max(0, this.maxImageCount - currentCount)
+    };
+  }
+  /**
+   * 批量验证文件（不添加）
+   */
+  validateFiles(files) {
+    const fileArray = Array.from(files);
+    const valid = [];
+    const invalid = [];
+    const warnings = [];
+    const currentCount = this.images.size;
+    const newCount = fileArray.length;
+    if (currentCount + newCount > this.maxImageCount) {
+      const allowedCount = Math.max(0, this.maxImageCount - currentCount);
+      warnings.push(`\u53EA\u80FD\u6DFB\u52A0 ${allowedCount} \u5F20\u56FE\u7247\uFF0C\u5C06\u5FFD\u7565\u591A\u4F59\u7684\u6587\u4EF6`);
+    }
+    fileArray.forEach((file, index) => {
+      if (currentCount + valid.length >= this.maxImageCount) {
+        invalid.push({ file, error: "\u8D85\u51FA\u6570\u91CF\u9650\u5236" });
+        return;
+      }
+      const validation = this.validateImage(file);
+      if (validation.valid) {
+        valid.push(file);
+      } else {
+        invalid.push({ file, error: validation.error || "\u9A8C\u8BC1\u5931\u8D25" });
+      }
+    });
+    return { valid, invalid, warnings };
+  }
+  /**
+   * 获取错误统计
+   */
+  getErrorStatistics(errors) {
+    var _a;
+    const byType = {};
+    let recoverable = 0;
+    let nonRecoverable = 0;
+    errors.forEach((error) => {
+      byType[error.errorType] = (byType[error.errorType] || 0) + 1;
+      if (error.recoverable) {
+        recoverable++;
+      } else {
+        nonRecoverable++;
+      }
+    });
+    const mostCommonError = ((_a = Object.entries(byType).sort(([, a], [, b]) => b - a)[0]) == null ? void 0 : _a[0]) || "none";
+    return {
+      totalErrors: errors.length,
+      byType,
+      recoverable,
+      nonRecoverable,
+      mostCommonError
+    };
+  }
+  /**
+   * 生成用户友好的错误报告
+   */
+  generateErrorReport(result) {
+    if (result.failed.length === 0) {
+      return `\u6210\u529F\u5904\u7406\u6240\u6709 ${result.successful.length} \u5F20\u56FE\u7247`;
+    }
+    const stats = this.getErrorStatistics(result.failed);
+    const lines = [
+      `\u5904\u7406\u5B8C\u6210: \u6210\u529F ${result.successful.length} \u5F20\uFF0C\u5931\u8D25 ${result.failed.length} \u5F20`,
+      `\u6210\u529F\u7387: ${result.successRate.toFixed(1)}%`
+    ];
+    if (stats.byType.validation > 0) {
+      lines.push(`- \u9A8C\u8BC1\u5931\u8D25: ${stats.byType.validation} \u5F20\uFF08\u6587\u4EF6\u683C\u5F0F\u6216\u5927\u5C0F\u95EE\u9898\uFF09`);
+    }
+    if (stats.byType.timeout > 0) {
+      lines.push(`- \u5904\u7406\u8D85\u65F6: ${stats.byType.timeout} \u5F20\uFF08\u7F51\u7EDC\u6216\u6587\u4EF6\u5904\u7406\u6162\uFF09`);
+    }
+    if (stats.byType.processing > 0) {
+      lines.push(`- \u5904\u7406\u5931\u8D25: ${stats.byType.processing} \u5F20\uFF08\u6587\u4EF6\u53EF\u80FD\u635F\u574F\uFF09`);
+    }
+    if (stats.recoverable > 0) {
+      lines.push(`
+\u53EF\u91CD\u8BD5: ${stats.recoverable} \u5F20\u56FE\u7247`);
+    }
+    if (stats.nonRecoverable > 0) {
+      lines.push(`\u9700\u8981\u4FEE\u590D: ${stats.nonRecoverable} \u5F20\u56FE\u7247`);
+    }
+    return lines.join("\n");
+  }
+  /**
+   * 清理失败的图片记录
+   */
+  cleanupFailedImages(errors) {
+    errors.forEach((error) => {
+      if (error.imageId && this.images.has(error.imageId)) {
+        this.images.delete(error.imageId);
+        console.log(`\u6E05\u7406\u5931\u8D25\u7684\u56FE\u7247\u8BB0\u5F55: ${error.fileName}`);
+      }
+    });
+  }
+  /**
+   * 重试可恢复的错误
+   */
+  async retryRecoverableErrors(errors, originalFiles) {
+    const retryableErrors = errors.filter((error) => error.recoverable);
+    const retryFiles = originalFiles.filter(
+      (file) => retryableErrors.find((error) => error.fileName === file.name)
+    );
+    if (retryFiles.length === 0) {
+      return {
+        successful: [],
+        failed: [],
+        totalProcessed: 0,
+        successRate: 0
+      };
+    }
+    console.log(`\u91CD\u8BD5 ${retryFiles.length} \u5F20\u53EF\u6062\u590D\u7684\u56FE\u7247`);
+    return await this.addImages(retryFiles);
+  }
+  /**
+   * 获取内存使用情况
+   */
+  getMemoryUsage() {
+    const images = this.getAllImages();
+    const totalSize = images.reduce((sum, img) => sum + img.fileSize, 0);
+    const averageSize = images.length > 0 ? totalSize / images.length : 0;
+    const estimatedMemory = totalSize * 2.5;
+    return {
+      totalImages: images.length,
+      totalSize,
+      averageSize,
+      memoryFootprint: this.formatFileSize(estimatedMemory)
+    };
+  }
+};
+
+// src/recording-modal.ts
 var RecordingModal = class extends import_obsidian3.Modal {
-  constructor(app, onRecordingComplete, onError, enableLLMProcessing = false, onCancel) {
+  constructor(app, onRecordingComplete, onError, enableLLMProcessing = false, enableImageOCR = false, onCancel) {
     super(app);
     this.audioRecorder = null;
     this.state = "idle";
@@ -1517,6 +3023,17 @@ var RecordingModal = class extends import_obsidian3.Modal {
     // 新增取消回调
     // Processing state
     this.enableLLMProcessing = false;
+    this.enableImageOCR = false;
+    // 图片组件状态
+    this.imageState = {
+      images: [],
+      selectedImages: /* @__PURE__ */ new Set(),
+      dragActive: false,
+      uploadProgress: /* @__PURE__ */ new Map(),
+      ocrProgress: null,
+      showPreview: false,
+      previewImageId: null
+    };
     // Cancel confirmation and protection mechanism
     this.isClosing = false;
     this.isDestroying = false;
@@ -1526,7 +3043,9 @@ var RecordingModal = class extends import_obsidian3.Modal {
     this.onRecordingComplete = onRecordingComplete;
     this.onError = onError;
     this.enableLLMProcessing = enableLLMProcessing;
+    this.enableImageOCR = enableImageOCR;
     this.onCancel = onCancel;
+    this.imageManager = new ImageManager();
   }
   onOpen() {
     const { contentEl } = this;
@@ -1558,6 +3077,9 @@ var RecordingModal = class extends import_obsidian3.Modal {
     const hintText = this.enableLLMProcessing ? "\u70B9\u51FB\u5F00\u59CB\u5F55\u97F3\uFF0C\u5B8C\u6210\u540E\u5C06\u8FDB\u884CAI\u8F6C\u5F55\u548C\u6587\u672C\u4F18\u5316" : "\u70B9\u51FB\u5F00\u59CB\u5F55\u97F3\uFF0C\u5F55\u97F3\u5B8C\u6210\u540E\u5C06\u81EA\u52A8\u8F6C\u6362\u4E3A\u6587\u5B57\u7B14\u8BB0";
     this.hintText = container.createEl("div", { text: hintText });
     this.hintText.addClass("simple-hint");
+    if (this.enableImageOCR) {
+      this.createImageSection(container);
+    }
     this.updateUI();
   }
   onClose() {
@@ -1722,6 +3244,19 @@ var RecordingModal = class extends import_obsidian3.Modal {
       this.audioRecorder.stopRecording();
     }
     this.audioRecorder = null;
+    if (this.imageManager) {
+      console.log("\u6E05\u7406\u56FE\u7247\u8D44\u6E90...");
+      this.imageManager.clearAllImages();
+    }
+    this.imageState = {
+      images: [],
+      selectedImages: /* @__PURE__ */ new Set(),
+      dragActive: false,
+      uploadProgress: /* @__PURE__ */ new Map(),
+      ocrProgress: null,
+      showPreview: false,
+      previewImageId: null
+    };
     this.state = "idle";
     this.isClosing = false;
     this.closeReason = "manual";
@@ -1778,7 +3313,8 @@ var RecordingModal = class extends import_obsidian3.Modal {
         this.timerInterval = null;
       }
       this.closeReason = "normal";
-      await this.onRecordingComplete(audioBlob);
+      const images = this.getImages();
+      await this.onRecordingComplete(audioBlob, images.length > 0 ? images : void 0);
       this.safeClose();
     } catch (error) {
       this.setState("idle");
@@ -1855,6 +3391,16 @@ var RecordingModal = class extends import_obsidian3.Modal {
         this.stopButton.setDisabled(true);
         this.cancelButton.setDisabled(false).setButtonText("\u274C \u53D6\u6D88");
         break;
+      case "ocr-processing":
+        this.statusContainer.addClass("status-recording");
+        this.statusText.textContent = "\u{1F50D} \u56FE\u7247\u8BC6\u522B\u4E2D...";
+        this.timeDisplay.removeClass("recording");
+        this.hintText.textContent = "\u6B63\u5728\u8BC6\u522B\u56FE\u7247\u4E2D\u7684\u6587\u5B57\u5185\u5BB9\uFF0C\u8BF7\u7A0D\u5019...";
+        this.startButton.setDisabled(true);
+        this.pauseButton.setDisabled(true);
+        this.stopButton.setDisabled(true);
+        this.cancelButton.setDisabled(false).setButtonText("\u274C \u53D6\u6D88");
+        break;
       case "processing":
         this.statusContainer.addClass("status-recording");
         this.statusText.textContent = "\u{1F916} AI\u5904\u7406\u4E2D...";
@@ -1894,6 +3440,237 @@ var RecordingModal = class extends import_obsidian3.Modal {
   // 公共方法：允许外部更新处理状态
   updateProcessingState(state) {
     this.setState(state);
+  }
+  /**
+   * 创建图片区域UI
+   */
+  createImageSection(container) {
+    this.imageSection = container.createDiv("image-section");
+    const imageTitle = this.imageSection.createEl("h3", { text: "\u{1F4F7} \u6DFB\u52A0\u56FE\u7247" });
+    imageTitle.addClass("image-section-title");
+    this.imageFileInput = this.imageManager.createFileInput();
+    this.imageSection.appendChild(this.imageFileInput);
+    this.createUploadArea();
+    this.createImageGrid();
+    this.createProgressAreas();
+    this.setupImageEvents();
+  }
+  /**
+   * 创建上传区域
+   */
+  createUploadArea() {
+    this.imageUploadArea = this.imageSection.createDiv("image-upload-area");
+    const uploadContent = this.imageUploadArea.createDiv("upload-content");
+    const uploadIcon = uploadContent.createEl("div", { text: "\u{1F4C1}" });
+    uploadIcon.addClass("upload-icon");
+    const uploadText = uploadContent.createEl("div", { text: "\u70B9\u51FB\u6216\u62D6\u62FD\u56FE\u7247\u5230\u6B64\u5904" });
+    uploadText.addClass("upload-text");
+    const uploadHint = uploadContent.createEl("div", { text: "\u652F\u6301 JPG\u3001PNG\u3001GIF\u3001WebP \u683C\u5F0F\uFF0C\u6700\u5927 10MB" });
+    uploadHint.addClass("upload-hint");
+    const uploadButton = uploadContent.createEl("button", { text: "\u9009\u62E9\u56FE\u7247" });
+    uploadButton.addClass("upload-button");
+    uploadButton.addEventListener("click", () => {
+      this.imageFileInput.click();
+    });
+  }
+  /**
+   * 创建图片网格
+   */
+  createImageGrid() {
+    this.imageGrid = this.imageSection.createDiv("image-grid");
+    this.imageGrid.addClass("image-grid");
+  }
+  /**
+   * 创建进度显示区域
+   */
+  createProgressAreas() {
+    this.imageProgress = this.imageSection.createDiv("image-progress");
+    this.imageProgress.addClass("progress-area");
+    this.imageProgress.style.display = "none";
+    this.ocrProgress = this.imageSection.createDiv("ocr-progress");
+    this.ocrProgress.addClass("progress-area");
+    this.ocrProgress.style.display = "none";
+  }
+  /**
+   * 设置图片相关事件
+   */
+  setupImageEvents() {
+    this.imageFileInput.addEventListener("change", async (event) => {
+      const target = event.target;
+      if (target.files && target.files.length > 0) {
+        await this.handleImageFiles(target.files);
+        target.value = "";
+      }
+    });
+    this.setupDragAndDrop();
+  }
+  /**
+   * 设置拖拽功能
+   */
+  setupDragAndDrop() {
+    const uploadArea = this.imageUploadArea;
+    uploadArea.addEventListener("dragenter", (e) => {
+      e.preventDefault();
+      this.imageState.dragActive = true;
+      uploadArea.addClass("drag-active");
+    });
+    uploadArea.addEventListener("dragover", (e) => {
+      e.preventDefault();
+    });
+    uploadArea.addEventListener("dragleave", (e) => {
+      e.preventDefault();
+      if (!uploadArea.contains(e.relatedTarget)) {
+        this.imageState.dragActive = false;
+        uploadArea.removeClass("drag-active");
+      }
+    });
+    uploadArea.addEventListener("drop", async (e) => {
+      var _a;
+      e.preventDefault();
+      this.imageState.dragActive = false;
+      uploadArea.removeClass("drag-active");
+      const files = (_a = e.dataTransfer) == null ? void 0 : _a.files;
+      if (files && files.length > 0) {
+        await this.handleImageFiles(files);
+      }
+    });
+  }
+  /**
+   * 处理选择的图片文件
+   */
+  async handleImageFiles(files) {
+    try {
+      this.showImageProgress("\u6B63\u5728\u6DFB\u52A0\u56FE\u7247...");
+      const result = await this.imageManager.addImagesLegacy(files);
+      if (result.added.length > 0) {
+        this.imageState.images = this.imageManager.getAllImages();
+        this.updateImageGrid();
+        new import_obsidian3.Notice(`\u6210\u529F\u6DFB\u52A0 ${result.added.length} \u5F20\u56FE\u7247`);
+      }
+      if (result.errors.length > 0) {
+        console.error("\u56FE\u7247\u6DFB\u52A0\u9519\u8BEF:", result.errors);
+        new import_obsidian3.Notice(`\u6DFB\u52A0\u56FE\u7247\u65F6\u51FA\u73B0\u9519\u8BEF: ${result.errors.slice(0, 2).join(", ")}`);
+      }
+    } catch (error) {
+      console.error("\u5904\u7406\u56FE\u7247\u6587\u4EF6\u5931\u8D25:", error);
+      new import_obsidian3.Notice("\u6DFB\u52A0\u56FE\u7247\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5");
+    } finally {
+      this.hideImageProgress();
+    }
+  }
+  /**
+   * 更新图片网格显示
+   */
+  updateImageGrid() {
+    this.imageGrid.empty();
+    if (this.imageState.images.length === 0) {
+      const emptyHint = this.imageGrid.createEl("div", { text: "\u8FD8\u672A\u6DFB\u52A0\u56FE\u7247" });
+      emptyHint.addClass("empty-hint");
+      return;
+    }
+    this.imageState.images.forEach((image) => {
+      const imageItem = this.createImageItem(image);
+      this.imageGrid.appendChild(imageItem);
+    });
+    this.updateImageCount();
+  }
+  /**
+   * 创建单个图片项
+   */
+  createImageItem(image) {
+    const itemEl = document.createElement("div");
+    itemEl.addClass("image-item");
+    itemEl.setAttribute("data-image-id", image.id);
+    const thumbnailContainer = itemEl.createDiv("thumbnail-container");
+    const thumbnail = thumbnailContainer.createEl("img", { attr: { src: image.thumbnailDataUrl } });
+    thumbnail.addClass("thumbnail");
+    thumbnail.alt = image.fileName;
+    const deleteButton = thumbnailContainer.createEl("button", { text: "\xD7" });
+    deleteButton.addClass("delete-button");
+    deleteButton.title = "\u5220\u9664\u56FE\u7247";
+    deleteButton.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.removeImage(image.id);
+    });
+    const infoContainer = itemEl.createDiv("image-info");
+    const fileName = infoContainer.createEl("div", { text: image.fileName });
+    fileName.addClass("file-name");
+    const fileSize = infoContainer.createEl("div", { text: this.formatFileSize(image.fileSize) });
+    fileSize.addClass("file-size");
+    return itemEl;
+  }
+  /**
+   * 删除图片
+   */
+  removeImage(imageId) {
+    const removed = this.imageManager.removeImage(imageId);
+    if (removed) {
+      this.imageState.images = this.imageManager.getAllImages();
+      this.updateImageGrid();
+      new import_obsidian3.Notice("\u56FE\u7247\u5DF2\u5220\u9664");
+    }
+  }
+  /**
+   * 显示图片处理进度
+   */
+  showImageProgress(message) {
+    this.imageProgress.style.display = "block";
+    this.imageProgress.textContent = message;
+  }
+  /**
+   * 隐藏图片处理进度
+   */
+  hideImageProgress() {
+    this.imageProgress.style.display = "none";
+  }
+  /**
+   * 显示OCR进度
+   */
+  showOCRProgress(progress) {
+    this.ocrProgress.style.display = "block";
+    const progressText = `OCR\u5904\u7406\u4E2D: ${progress.currentFileName} (${progress.currentIndex}/${progress.totalImages})`;
+    this.ocrProgress.textContent = progressText;
+  }
+  /**
+   * 隐藏OCR进度
+   */
+  hideOCRProgress() {
+    this.ocrProgress.style.display = "none";
+  }
+  /**
+   * 更新图片计数显示
+   */
+  updateImageCount() {
+    const count = this.imageState.images.length;
+    const title = this.imageSection.querySelector(".image-section-title");
+    if (title) {
+      title.textContent = count > 0 ? `\u{1F4F7} \u6DFB\u52A0\u56FE\u7247 (${count})` : "\u{1F4F7} \u6DFB\u52A0\u56FE\u7247";
+    }
+  }
+  /**
+   * 格式化文件大小
+   */
+  formatFileSize(bytes) {
+    if (bytes === 0)
+      return "0 B";
+    const k = 1024;
+    const sizes = ["B", "KB", "MB", "GB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+  }
+  /**
+   * 获取当前图片列表
+   */
+  getImages() {
+    return this.imageManager.getAllImages();
+  }
+  /**
+   * 清空所有图片
+   */
+  clearImages() {
+    this.imageManager.clearAllImages();
+    this.imageState.images = [];
+    this.updateImageGrid();
   }
 };
 
@@ -1965,14 +3742,15 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
     this.isProcessingCancelled = false;
     this.recordingModal = new RecordingModal(
       this.app,
-      (audioBlob) => this.handleAudioData(audioBlob),
+      (audioBlob, images) => this.handleMultimodalData(audioBlob, images),
       (error) => this.handleRecordingError(error),
       this.settings.enableLLMProcessing,
+      this.settings.enableImageOCR,
       () => this.handleRecordingCancel()
     );
     this.recordingModal.open();
   }
-  async handleAudioData(audioBlob) {
+  async handleMultimodalData(audioBlob, images) {
     const processingStartTime = Date.now();
     this.isProcessingCancelled = false;
     try {
@@ -1984,15 +3762,19 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
         new import_obsidian4.Notice(sizeCheck.message || "\u97F3\u9891\u6587\u4EF6\u8FC7\u5927");
         return;
       }
+      const hasAudio = audioBlob.size > 0;
+      const hasImages = images && images.length > 0;
+      const isMultimodal = hasAudio && hasImages;
+      console.log(`\u5F00\u59CB\u591A\u6A21\u6001\u5904\u7406 - \u97F3\u9891: ${hasAudio}, \u56FE\u7247: ${hasImages ? images.length : 0}\u5F20, \u591A\u6A21\u6001: ${isMultimodal}`);
       let audioMetadata = {};
-      if (this.settings.keepOriginalAudio) {
+      if (this.settings.keepOriginalAudio && hasAudio) {
         try {
           if (this.recordingModal) {
             this.recordingModal.updateProcessingState("saving-audio");
           }
           new import_obsidian4.Notice("\u6B63\u5728\u4FDD\u5B58\u97F3\u9891\u6587\u4EF6...");
           console.log("\u5F00\u59CB\u4FDD\u5B58\u97F3\u9891\u6587\u4EF6");
-          const tempFileName = this.noteGenerator.generateFileName("\u8BED\u97F3\u8F6C\u5F55", new Date());
+          const tempFileName = this.noteGenerator.generateFileName("\u591A\u6A21\u6001\u7B14\u8BB0", new Date());
           const audioResult = await this.noteGenerator.saveAudioFile(
             audioBlob,
             this.settings.outputFolder,
@@ -2000,52 +3782,136 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
           );
           audioMetadata = {
             audioFileName: audioResult.audioFile.name,
-            audioFilePath: audioResult.audioFilePath
+            audioFilePath: audioResult.audioFilePath,
+            audioBlob
           };
           console.log("\u97F3\u9891\u6587\u4EF6\u4FDD\u5B58\u5B8C\u6210:", audioResult.audioFilePath);
         } catch (audioSaveError) {
           console.error("\u4FDD\u5B58\u97F3\u9891\u6587\u4EF6\u5931\u8D25:", audioSaveError);
-          new import_obsidian4.Notice("\u4FDD\u5B58\u97F3\u9891\u6587\u4EF6\u5931\u8D25\uFF0C\u4F46\u4F1A\u7EE7\u7EED\u8FDB\u884C\u6587\u5B57\u8F6C\u5F55");
+          new import_obsidian4.Notice("\u4FDD\u5B58\u97F3\u9891\u6587\u4EF6\u5931\u8D25\uFF0C\u4F46\u4F1A\u7EE7\u7EED\u8FDB\u884C\u5904\u7406");
         }
         if (this.isProcessingCancelled) {
           console.log("\u97F3\u9891\u4FDD\u5B58\u540E\u88AB\u7528\u6237\u53D6\u6D88");
           return;
         }
       }
-      if (this.recordingModal) {
-        this.recordingModal.updateProcessingState("transcribing");
+      let transcribedText = "";
+      if (hasAudio) {
+        if (this.recordingModal) {
+          this.recordingModal.updateProcessingState("transcribing");
+        }
+        new import_obsidian4.Notice("\u6B63\u5728\u8C03\u7528AI\u8F6C\u5F55\u97F3\u9891...");
+        console.log("\u5F00\u59CB\u8BED\u97F3\u8F6C\u5F55\u5904\u7406");
+        transcribedText = await this.dashScopeClient.processAudio(audioBlob);
+        if (this.isProcessingCancelled) {
+          console.log("\u8BED\u97F3\u8F6C\u5F55\u5DF2\u88AB\u7528\u6237\u53D6\u6D88");
+          return;
+        }
+        console.log("\u8BED\u97F3\u8F6C\u5F55\u5B8C\u6210\uFF0C\u6587\u672C\u957F\u5EA6:", transcribedText.length);
       }
-      new import_obsidian4.Notice("\u6B63\u5728\u8C03\u7528AI\u8F6C\u5F55\u97F3\u9891...");
-      console.log("\u5F00\u59CB\u8BED\u97F3\u8F6C\u5F55\u5904\u7406");
-      const transcribedText = await this.dashScopeClient.processAudio(audioBlob);
-      if (this.isProcessingCancelled) {
-        console.log("\u8BED\u97F3\u8F6C\u5F55\u5DF2\u88AB\u7528\u6237\u53D6\u6D88");
-        return;
+      let ocrResults = /* @__PURE__ */ new Map();
+      let totalOCRText = "";
+      if (hasImages && this.settings.enableImageOCR) {
+        if (this.recordingModal) {
+          this.recordingModal.updateProcessingState("ocr-processing");
+        }
+        new import_obsidian4.Notice(`\u6B63\u5728\u8BC6\u522B${images.length}\u5F20\u56FE\u7247\u4E2D\u7684\u6587\u5B57...`);
+        console.log(`\u5F00\u59CBOCR\u5904\u7406\uFF0C\u5171${images.length}\u5F20\u56FE\u7247`);
+        const ocrPromises = images.map(async (image) => {
+          try {
+            const base64Data = image.originalDataUrl.split(",")[1];
+            const result = await this.dashScopeClient.processImageOCR(base64Data, image.fileType);
+            ocrResults.set(image.id, result);
+            console.log(`\u56FE\u7247${image.fileName}OCR\u5B8C\u6210\uFF0C\u8BC6\u522B\u6587\u5B57\u957F\u5EA6:`, result.text.length);
+            return { imageId: image.id, result };
+          } catch (error) {
+            console.error(`\u56FE\u7247${image.fileName}OCR\u5931\u8D25:`, error);
+            return { imageId: image.id, error };
+          }
+        });
+        await Promise.all(ocrPromises);
+        if (this.isProcessingCancelled) {
+          console.log("OCR\u5904\u7406\u5DF2\u88AB\u7528\u6237\u53D6\u6D88");
+          return;
+        }
+        totalOCRText = Array.from(ocrResults.values()).map((result) => result.text).filter((text) => text.trim().length > 0).join("\n\n");
+        console.log("OCR\u5904\u7406\u5B8C\u6210\uFF0C\u603B\u6587\u5B57\u957F\u5EA6:", totalOCRText.length);
       }
-      console.log("\u8BED\u97F3\u8F6C\u5F55\u5B8C\u6210\uFF0C\u6587\u672C\u957F\u5EA6:", transcribedText.length);
-      let enhancedContent;
-      if (this.settings.enableLLMProcessing && this.textProcessor) {
+      const multimodalContent = {
+        audio: hasAudio ? {
+          transcribedText,
+          duration: "\u5F55\u97F3\u65F6\u957F",
+          // Modal中管理
+          audioFileName: audioMetadata.audioFileName,
+          audioFilePath: audioMetadata.audioFilePath,
+          audioBlob: audioMetadata.audioBlob
+        } : void 0,
+        images: hasImages ? {
+          items: images,
+          ocrResults,
+          totalOCRText
+        } : void 0,
+        combinedText: this.combineAudioAndOCRText(transcribedText, totalOCRText),
+        metadata: {
+          hasAudio,
+          hasImages,
+          audioCount: hasAudio ? 1 : 0,
+          imageCount: hasImages ? images.length : 0,
+          totalProcessingTime: "",
+          models: {
+            speechModel: hasAudio ? this.settings.modelName : void 0,
+            ocrModel: hasImages && this.settings.enableImageOCR ? this.settings.ocrModel : void 0,
+            textModel: this.settings.enableLLMProcessing ? this.settings.textModel : void 0
+          },
+          createdAt: new Date()
+        }
+      };
+      let multimodalResult;
+      if ((this.settings.enableLLMProcessing || hasImages && this.settings.combineAudioAndOCR) && this.textProcessor) {
         if (this.recordingModal) {
           this.recordingModal.updateProcessingState("processing");
         }
-        new import_obsidian4.Notice("\u6B63\u5728\u4F7F\u7528AI\u589E\u5F3A\u5904\u7406\u6587\u672C...");
-        console.log("\u5F00\u59CBAI\u589E\u5F3A\u6587\u672C\u5904\u7406");
-        enhancedContent = await this.textProcessor.processTranscribedTextEnhanced(transcribedText);
+        new import_obsidian4.Notice("\u6B63\u5728\u4F7F\u7528AI\u5904\u7406\u591A\u6A21\u6001\u5185\u5BB9...");
+        console.log("\u5F00\u59CB\u591A\u6A21\u6001AI\u5904\u7406");
+        multimodalResult = await this.textProcessor.processMultimodalContent(multimodalContent);
         if (this.isProcessingCancelled) {
-          console.log("AI\u6587\u672C\u5904\u7406\u5DF2\u88AB\u7528\u6237\u53D6\u6D88");
+          console.log("\u591A\u6A21\u6001AI\u5904\u7406\u5DF2\u88AB\u7528\u6237\u53D6\u6D88");
           return;
         }
-        console.log("AI\u589E\u5F3A\u5904\u7406\u5B8C\u6210\uFF0C\u662F\u5426\u5DF2\u5904\u7406:", enhancedContent.isProcessed);
+        console.log("\u591A\u6A21\u6001AI\u5904\u7406\u5B8C\u6210\uFF0C\u662F\u5426\u5DF2\u5904\u7406:", multimodalResult.isProcessed);
       } else {
-        enhancedContent = {
-          originalText: transcribedText,
-          processedText: transcribedText,
+        multimodalResult = {
+          audioText: transcribedText,
+          ocrText: totalOCRText,
+          combinedText: multimodalContent.combinedText,
+          processedText: multimodalContent.combinedText,
+          summary: multimodalContent.combinedText,
           tags: [],
           structuredTags: { people: [], events: [], topics: [], times: [], locations: [] },
-          summary: transcribedText,
-          smartTitle: transcribedText.substring(0, 20) + "...",
-          isProcessed: false
+          smartTitle: this.generateBasicTitle(multimodalContent.combinedText),
+          isProcessed: false,
+          audioOnly: hasAudio && !hasImages,
+          imageOnly: !hasAudio && hasImages,
+          multimodal: isMultimodal
         };
+      }
+      if (hasImages && this.settings.showOriginalImages) {
+        try {
+          new import_obsidian4.Notice("\u6B63\u5728\u4FDD\u5B58\u56FE\u7247\u6587\u4EF6...");
+          console.log("\u5F00\u59CB\u4FDD\u5B58\u56FE\u7247\u5230vault");
+          for (const image of images) {
+            const imageResult = await this.noteGenerator.saveImageFile(
+              image,
+              this.settings.outputFolder
+            );
+            image.vaultPath = imageResult.relativePath;
+            image.vaultFile = imageResult.imageFile;
+          }
+          console.log("\u56FE\u7247\u4FDD\u5B58\u5B8C\u6210");
+        } catch (imageSaveError) {
+          console.error("\u4FDD\u5B58\u56FE\u7247\u5931\u8D25:", imageSaveError);
+          new import_obsidian4.Notice("\u4FDD\u5B58\u56FE\u7247\u5931\u8D25\uFF0C\u4F46\u4F1A\u7EE7\u7EED\u751F\u6210\u7B14\u8BB0");
+        }
       }
       if (this.recordingModal) {
         this.recordingModal.updateProcessingState("saving");
@@ -2055,48 +3921,53 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
         return;
       }
       const processingDuration = Date.now() - processingStartTime;
-      const metadata = {
-        title: enhancedContent.smartTitle,
-        timestamp: new Date(),
-        duration: "\u97F3\u9891\u8F6C\u5F55",
-        // 由于使用Modal，录音时长在Modal中管理
-        audioSize: this.noteGenerator.formatFileSize(audioBlob.size),
-        processingTime: this.noteGenerator.formatDuration(processingDuration),
-        model: this.settings.modelName,
-        textModel: this.settings.enableLLMProcessing ? this.settings.textModel : void 0,
-        isProcessed: enhancedContent.isProcessed,
-        // 添加音频文件信息
-        audioFileName: audioMetadata.audioFileName,
-        audioFilePath: audioMetadata.audioFilePath
-      };
-      const noteContent = this.noteGenerator.generateEnhancedNoteContent(
-        enhancedContent,
-        metadata
-      );
+      multimodalContent.metadata.totalProcessingTime = this.noteGenerator.formatDuration(processingDuration);
+      multimodalContent.metadata.processedAt = new Date();
       if (this.settings.autoSave) {
-        const fileName = this.noteGenerator.generateFileName("\u8BED\u97F3\u8F6C\u5F55", metadata.timestamp);
+        const fileName = this.noteGenerator.generateFileName(
+          isMultimodal ? "\u591A\u6A21\u6001\u7B14\u8BB0" : hasImages ? "\u56FE\u7247\u7B14\u8BB0" : "\u8BED\u97F3\u7B14\u8BB0",
+          multimodalContent.metadata.createdAt
+        );
+        const noteContent = this.noteGenerator.generateMultimodalNoteContent(
+          multimodalContent,
+          {
+            includeAudioSection: hasAudio,
+            includeOCRSection: hasImages && this.settings.includeOCRInNote,
+            includeImageSection: hasImages && this.settings.showOriginalImages,
+            includeSummarySection: multimodalResult.isProcessed,
+            includeMetadata: this.settings.includeMetadata,
+            audioOptions: {
+              includeOriginalAudio: this.settings.keepOriginalAudio,
+              showTranscription: true
+            },
+            imageOptions: {
+              includeOriginalImages: this.settings.showOriginalImages,
+              showOCRText: this.settings.includeOCRInNote,
+              thumbnailSize: "medium"
+            },
+            summaryOptions: {
+              generateTags: this.settings.generateTags,
+              generateSummary: true,
+              combineAudioAndOCR: this.settings.combineAudioAndOCR
+            }
+          }
+        );
         const savedFile = await this.noteGenerator.saveNote(
           noteContent,
           this.settings.outputFolder,
           fileName
         );
-        const audioSavedMessage = this.settings.keepOriginalAudio && audioMetadata.audioFileName ? "\uFF0C\u539F\u97F3\u9891\u5DF2\u4FDD\u5B58" : "";
-        if (enhancedContent.isProcessed) {
-          const structuredTagsCount = Object.values(enhancedContent.structuredTags).reduce((count, tagArray) => count + tagArray.length, 0);
-          const totalTags = enhancedContent.tags.length + structuredTagsCount;
-          new import_obsidian4.Notice(`AI\u589E\u5F3A\u5904\u7406\u5B8C\u6210\uFF01\u7B14\u8BB0\u5DF2\u4FDD\u5B58: ${savedFile.name}\uFF0C\u5305\u542B${totalTags}\u4E2A\u7ED3\u6784\u5316\u6807\u7B7E${audioSavedMessage}`);
-        } else {
-          new import_obsidian4.Notice(`\u8F6C\u5F55\u5B8C\u6210\uFF0C\u7B14\u8BB0\u5DF2\u4FDD\u5B58: ${savedFile.name}${audioSavedMessage}`);
-        }
-        console.log("\u7B14\u8BB0\u4FDD\u5B58\u5B8C\u6210:", savedFile.path);
+        const contentSummary = this.generateCompletionMessage(multimodalResult, hasAudio, hasImages, audioMetadata.audioFileName);
+        new import_obsidian4.Notice(`${contentSummary}\u7B14\u8BB0\u5DF2\u4FDD\u5B58: ${savedFile.name}`);
+        console.log("\u591A\u6A21\u6001\u7B14\u8BB0\u4FDD\u5B58\u5B8C\u6210:", savedFile.path);
       } else {
-        const message = enhancedContent.isProcessed ? "AI\u589E\u5F3A\u5904\u7406\u5B8C\u6210\uFF0C\u8BF7\u624B\u52A8\u4FDD\u5B58\u7B14\u8BB0" : "\u97F3\u9891\u8F6C\u5F55\u5B8C\u6210\uFF0C\u8BF7\u624B\u52A8\u4FDD\u5B58\u7B14\u8BB0";
+        const message = multimodalResult.isProcessed ? "\u591A\u6A21\u6001AI\u5904\u7406\u5B8C\u6210\uFF0C\u8BF7\u624B\u52A8\u4FDD\u5B58\u7B14\u8BB0" : "\u591A\u6A21\u6001\u5185\u5BB9\u5904\u7406\u5B8C\u6210\uFF0C\u8BF7\u624B\u52A8\u4FDD\u5B58\u7B14\u8BB0";
         new import_obsidian4.Notice(message);
       }
       this.recordingModal = null;
     } catch (error) {
-      console.error("\u5904\u7406\u97F3\u9891\u65F6\u51FA\u9519:", error);
-      new import_obsidian4.Notice(`\u5904\u7406\u97F3\u9891\u65F6\u51FA\u9519: ${error.message}`);
+      console.error("\u5904\u7406\u591A\u6A21\u6001\u5185\u5BB9\u65F6\u51FA\u9519:", error);
+      new import_obsidian4.Notice(`\u5904\u7406\u591A\u6A21\u6001\u5185\u5BB9\u65F6\u51FA\u9519: ${error.message}`);
       this.isProcessingCancelled = true;
       if (this.recordingModal) {
         try {
@@ -2138,5 +4009,62 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
     if (this.recordingModal) {
       this.recordingModal = null;
     }
+  }
+  /**
+   * 合并音频和OCR文字
+   */
+  combineAudioAndOCRText(audioText, ocrText) {
+    const parts = [];
+    if (audioText && audioText.trim()) {
+      parts.push("\u3010\u8BED\u97F3\u5185\u5BB9\u3011\n" + audioText.trim());
+    }
+    if (ocrText && ocrText.trim()) {
+      parts.push("\u3010\u56FE\u7247\u6587\u5B57\u3011\n" + ocrText.trim());
+    }
+    return parts.join("\n\n");
+  }
+  /**
+   * 生成完成消息
+   */
+  generateCompletionMessage(result, hasAudio, hasImages, audioFileName) {
+    const parts = [];
+    if (result.multimodal) {
+      parts.push("\u591A\u6A21\u6001AI\u5904\u7406\u5B8C\u6210\uFF01");
+    } else if (result.audioOnly) {
+      parts.push("\u8BED\u97F3AI\u5904\u7406\u5B8C\u6210\uFF01");
+    } else if (result.imageOnly) {
+      parts.push("\u56FE\u7247OCR\u5904\u7406\u5B8C\u6210\uFF01");
+    }
+    if (result.isProcessed) {
+      const totalTags = result.tags.length + Object.values(result.structuredTags).reduce((count, tagArray) => count + tagArray.length, 0);
+      if (totalTags > 0) {
+        parts.push(`\u5305\u542B${totalTags}\u4E2A\u7ED3\u6784\u5316\u6807\u7B7E`);
+      }
+    }
+    const fileParts = [];
+    if (hasAudio && audioFileName) {
+      fileParts.push("\u539F\u97F3\u9891\u5DF2\u4FDD\u5B58");
+    }
+    if (hasImages) {
+      fileParts.push("\u56FE\u7247\u5DF2\u4FDD\u5B58");
+    }
+    if (fileParts.length > 0) {
+      parts.push(`\uFF0C${fileParts.join("\uFF0C")}`);
+    }
+    return parts.join("") + "\uFF0C";
+  }
+  /**
+   * 生成基础标题
+   */
+  generateBasicTitle(text) {
+    if (!text || text.trim().length === 0) {
+      return "\u591A\u6A21\u6001\u7B14\u8BB0";
+    }
+    const words = text.trim().split(/\s+/);
+    let title = words.slice(0, 8).join(" ");
+    if (title.length > 30) {
+      title = title.substring(0, 27) + "...";
+    }
+    return title || "\u591A\u6A21\u6001\u7B14\u8BB0";
   }
 };
