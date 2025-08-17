@@ -24,6 +24,10 @@ export class RecordingModal extends Modal {
     private cancelButton: ButtonComponent;
     private hintText: HTMLElement;
     
+    // Wake Lock状态显示
+    private wakeLockIndicator: HTMLElement;
+    private wakeLockText: HTMLElement;
+    
     // 图片相关UI元素
     private imageSection: HTMLElement;
     private imageUploadArea: HTMLElement;
@@ -40,6 +44,7 @@ export class RecordingModal extends Modal {
     // Processing state
     private enableLLMProcessing: boolean = false;
     private enableImageOCR: boolean = false;
+    private enableWakeLock: boolean = true;
     
     // 图片组件状态
     private imageState: ImageComponentState = {
@@ -65,7 +70,8 @@ export class RecordingModal extends Modal {
         onError: (error: Error) => void,
         enableLLMProcessing: boolean = false,
         enableImageOCR: boolean = false,
-        onCancel?: () => void
+        onCancel?: () => void,
+        enableWakeLock: boolean = true
     ) {
         super(app);
         this.onRecordingComplete = onRecordingComplete;
@@ -73,6 +79,7 @@ export class RecordingModal extends Modal {
         this.enableLLMProcessing = enableLLMProcessing;
         this.enableImageOCR = enableImageOCR;
         this.onCancel = onCancel;
+        this.enableWakeLock = enableWakeLock;
         
         // 初始化图片管理器
         this.imageManager = new ImageManager();
@@ -89,7 +96,7 @@ export class RecordingModal extends Modal {
         const container = contentEl.createDiv('simple-recording-container');
         
         // 标题
-        const title = container.createEl('h2', { text: '🎙️ 语音录制' });
+        const title = container.createEl('h2', { text: '语音录制' });
         title.addClass('simple-recording-title');
         
         // 状态指示器
@@ -103,6 +110,14 @@ export class RecordingModal extends Modal {
         this.timeDisplay = container.createEl('div', { text: '00:00' });
         this.timeDisplay.addClass('simple-time');
         
+        // Wake Lock状态指示器
+        this.wakeLockIndicator = container.createDiv('wake-lock-indicator');
+        this.wakeLockIndicator.style.display = 'none'; // 初始隐藏
+        const wakeLockIcon = this.wakeLockIndicator.createDiv('wake-lock-icon');
+        wakeLockIcon.setText('🔒');
+        this.wakeLockText = this.wakeLockIndicator.createEl('span', { text: '防锁屏已激活' });
+        this.wakeLockText.addClass('wake-lock-text');
+        
         // 按钮组
         const buttonGroup = container.createDiv('simple-buttons');
         
@@ -110,14 +125,14 @@ export class RecordingModal extends Modal {
         const startButtonEl = buttonGroup.createEl('button');
         startButtonEl.addClass('start-btn');
         this.startButton = new ButtonComponent(startButtonEl)
-            .setButtonText('🎤 开始录音')
+            .setButtonText('开始录音')
             .onClick(() => this.handleStart());
         
         // 暂停按钮
         const pauseButtonEl = buttonGroup.createEl('button');
         pauseButtonEl.addClass('pause-btn');
         this.pauseButton = new ButtonComponent(pauseButtonEl)
-            .setButtonText('⏸️ 暂停')
+            .setButtonText('暂停')
             .setDisabled(true)
             .onClick(() => this.handlePause());
         
@@ -125,7 +140,7 @@ export class RecordingModal extends Modal {
         const stopButtonEl = buttonGroup.createEl('button');
         stopButtonEl.addClass('stop-btn');
         this.stopButton = new ButtonComponent(stopButtonEl)
-            .setButtonText('⏹️ 停止')
+            .setButtonText('停止')
             .setDisabled(true)
             .onClick(() => this.handleStop());
 
@@ -133,7 +148,7 @@ export class RecordingModal extends Modal {
         const cancelButtonEl = buttonGroup.createEl('button');
         cancelButtonEl.addClass('cancel-btn');
         this.cancelButton = new ButtonComponent(cancelButtonEl)
-            .setButtonText('❌ 取消')
+            .setButtonText('取消')
             .onClick(() => this.handleCancel());
         
         // 提示文字
@@ -147,6 +162,9 @@ export class RecordingModal extends Modal {
         if (this.enableImageOCR) {
             this.createImageSection(container);
         }
+        
+        // iOS特定优化
+        this.optimizeForIOS();
         
         // 设置初始状态
         this.updateUI();
@@ -421,31 +439,58 @@ export class RecordingModal extends Modal {
                 this.setState('recording');
                 new Notice('继续录音...');
             } else {
-                // 开始新录音
+                // 开始新录音 - 优化iOS交互流程
+                
+                // 先检查iOS权限状态
+                const isIOS = this.detectIOS();
+                if (isIOS) {
+                    const iosStatus = await AudioRecorder.checkIOSMicrophoneStatus();
+                    if (!iosStatus.supported) {
+                        throw new Error(`录音功能不受支持: ${iosStatus.error}`);
+                    }
+                    if (!iosStatus.hasPermission && iosStatus.error) {
+                        throw new Error(`麦克风权限问题: ${iosStatus.error}`);
+                    }
+                }
+                
+                // 设置状态 - 必须在用户手势触发的函数中
                 this.setState('recording');
                 
                 // 检查麦克风权限
                 const hasPermission = await AudioRecorder.checkMicrophonePermission();
                 if (!hasPermission) {
-                    throw new Error('需要麦克风权限才能录音');
+                    throw new Error('需要麦克风权限才能录音。请在浏览器设置中允许麦克风访问。');
                 }
                 
-                // 创建录音器
+                // 创建录音器 - 确保在用户交互上下文中
                 this.audioRecorder = new AudioRecorder(
                     (audioBlob) => this.handleRecordingComplete(audioBlob),
-                    (error) => this.handleRecordingError(error)
+                    (error) => this.handleRecordingError(error),
+                    {
+                        enableWakeLock: this.enableWakeLock, // 使用设置中的配置
+                        onWakeLockChange: (isActive, error) => this.handleWakeLockChange(isActive, error)
+                    }
                 );
                 
+                // 启动录音 - 关键：这必须在用户手势事件的调用栈中
                 await this.audioRecorder.startRecording();
                 
                 // 启动定时器
                 this.startTimer();
                 
-                new Notice('开始录音...');
+                const message = isIOS ? '录音已开始（iOS设备请保持页面活跃）' : '开始录音...';
+                new Notice(message);
             }
         } catch (error) {
             this.setState('idle');
-            this.onError(error as Error);
+            const errorMsg = error instanceof Error ? error.message : '录音启动失败';
+            
+            // iOS特定错误提示
+            if (this.detectIOS() && errorMsg.includes('NotAllowedError')) {
+                this.onError(new Error('麦克风权限被拒绝。请在Safari设置中允许此网站访问麦克风，然后重新尝试。'));
+            } else {
+                this.onError(new Error(errorMsg));
+            }
         }
     }
 
@@ -540,7 +585,7 @@ export class RecordingModal extends Modal {
                     : '点击开始录音，录音完成后将自动转换为文字笔记';
                 
                 // 按钮状态
-                this.startButton.setDisabled(false).setButtonText('🎤 开始录音');
+                this.startButton.setDisabled(false).setButtonText('开始录音');
                 this.pauseButton.setDisabled(true);
                 this.stopButton.setDisabled(true);
                 this.cancelButton.setDisabled(true);
@@ -566,7 +611,7 @@ export class RecordingModal extends Modal {
                 this.hintText.textContent = '录音已暂停，可以继续录音或停止录音';
                 
                 // 按钮状态
-                this.startButton.setDisabled(false).setButtonText('▶️ 继续录音');
+                this.startButton.setDisabled(false).setButtonText('继续录音');
                 this.pauseButton.setDisabled(true);
                 this.stopButton.setDisabled(false);
                 this.cancelButton.setDisabled(false);
@@ -574,7 +619,7 @@ export class RecordingModal extends Modal {
                 
             case 'saving-audio':
                 this.statusContainer.addClass('status-recording'); // 使用录音状态的样式
-                this.statusText.textContent = '💾 保存音频...';
+                this.statusText.textContent = '保存音频...';
                 this.timeDisplay.removeClass('recording');
                 this.hintText.textContent = '正在保存音频文件，请稍候...';
                 
@@ -582,12 +627,12 @@ export class RecordingModal extends Modal {
                 this.startButton.setDisabled(true);
                 this.pauseButton.setDisabled(true);
                 this.stopButton.setDisabled(true);
-                this.cancelButton.setDisabled(false).setButtonText('❌ 取消');
+                this.cancelButton.setDisabled(false).setButtonText('取消');
                 break;
                 
             case 'transcribing':
                 this.statusContainer.addClass('status-recording'); // 使用录音状态的样式
-                this.statusText.textContent = '🔄 正在转录...';
+                this.statusText.textContent = '正在转录...';
                 this.timeDisplay.removeClass('recording');
                 this.hintText.textContent = '正在将语音转换为文字，请稍候...';
                 
@@ -595,12 +640,12 @@ export class RecordingModal extends Modal {
                 this.startButton.setDisabled(true);
                 this.pauseButton.setDisabled(true);
                 this.stopButton.setDisabled(true);
-                this.cancelButton.setDisabled(false).setButtonText('❌ 取消');
+                this.cancelButton.setDisabled(false).setButtonText('取消');
                 break;
                 
             case 'ocr-processing':
                 this.statusContainer.addClass('status-recording'); // 使用录音状态的样式
-                this.statusText.textContent = '🔍 图片识别中...';
+                this.statusText.textContent = '图片识别中...';
                 this.timeDisplay.removeClass('recording');
                 this.hintText.textContent = '正在识别图片中的文字内容，请稍候...';
                 
@@ -608,12 +653,12 @@ export class RecordingModal extends Modal {
                 this.startButton.setDisabled(true);
                 this.pauseButton.setDisabled(true);
                 this.stopButton.setDisabled(true);
-                this.cancelButton.setDisabled(false).setButtonText('❌ 取消');
+                this.cancelButton.setDisabled(false).setButtonText('取消');
                 break;
                 
             case 'processing':
                 this.statusContainer.addClass('status-recording'); // 使用录音状态的样式
-                this.statusText.textContent = '🤖 AI处理中...';
+                this.statusText.textContent = 'AI处理中...';
                 this.timeDisplay.removeClass('recording');
                 this.hintText.textContent = '正在使用AI优化文本内容和生成标签，请稍候...';
                 
@@ -621,12 +666,12 @@ export class RecordingModal extends Modal {
                 this.startButton.setDisabled(true);
                 this.pauseButton.setDisabled(true);
                 this.stopButton.setDisabled(true);
-                this.cancelButton.setDisabled(false).setButtonText('❌ 取消');
+                this.cancelButton.setDisabled(false).setButtonText('取消');
                 break;
                 
             case 'saving':
                 this.statusContainer.addClass('status-recording'); // 使用录音状态的样式
-                this.statusText.textContent = '💾 保存中...';
+                this.statusText.textContent = '保存中...';
                 this.timeDisplay.removeClass('recording');
                 this.hintText.textContent = '正在保存笔记到您的库中...';
                 
@@ -634,7 +679,7 @@ export class RecordingModal extends Modal {
                 this.startButton.setDisabled(true);
                 this.pauseButton.setDisabled(true);
                 this.stopButton.setDisabled(true);
-                this.cancelButton.setDisabled(false).setButtonText('❌ 取消');
+                this.cancelButton.setDisabled(false).setButtonText('取消');
                 break;
         }
     }
@@ -667,7 +712,7 @@ export class RecordingModal extends Modal {
         this.imageSection = container.createDiv('image-section');
         
         // 图片区域标题
-        const imageTitle = this.imageSection.createEl('h3', { text: '📷 添加图片' });
+        const imageTitle = this.imageSection.createEl('h3', { text: '添加图片' });
         imageTitle.addClass('image-section-title');
         
         // 创建文件输入
@@ -696,7 +741,7 @@ export class RecordingModal extends Modal {
         const uploadContent = this.imageUploadArea.createDiv('upload-content');
         
         // 上传图标和文字
-        const uploadIcon = uploadContent.createEl('div', { text: '📁' });
+        const uploadIcon = uploadContent.createEl('div', { text: '文件' });
         uploadIcon.addClass('upload-icon');
         
         const uploadText = uploadContent.createEl('div', { text: '点击或拖拽图片到此处' });
@@ -927,7 +972,7 @@ export class RecordingModal extends Modal {
         const count = this.imageState.images.length;
         const title = this.imageSection.querySelector('.image-section-title');
         if (title) {
-            title.textContent = count > 0 ? `📷 添加图片 (${count})` : '📷 添加图片';
+            title.textContent = count > 0 ? `添加图片 (${count})` : '添加图片';
         }
     }
 
@@ -958,5 +1003,109 @@ export class RecordingModal extends Modal {
         this.imageManager.clearAllImages();
         this.imageState.images = [];
         this.updateImageGrid();
+    }
+
+    /**
+     * 检测是否为iOS设备
+     */
+    private detectIOS(): boolean {
+        return AudioRecorder.detectIOSStatic();
+    }
+
+    /**
+     * iOS特定的UI优化
+     */
+    private optimizeForIOS(): void {
+        if (!this.detectIOS()) return;
+
+        // 为iOS添加特定的CSS类
+        this.contentEl.addClass('ios-optimized');
+        
+        // 检查Wake Lock支持状态
+        const wakeLockSupport = AudioRecorder.checkWakeLockSupport();
+        
+        // 添加iOS特定的提示信息
+        let hintText = 'iOS提示：首次使用请在Safari设置中允许麦克风访问';
+        if (wakeLockSupport.isSupported) {
+            hintText += '，录音时将自动防止锁屏';
+        } else {
+            hintText += '，录音时请保持屏幕开启';
+        }
+        
+        const iosHint = this.contentEl.createEl('div', { text: hintText });
+        iosHint.addClass('ios-hint');
+        
+        // 如果不支持Wake Lock，显示额外警告
+        if (!wakeLockSupport.isSupported) {
+            const warningHint = this.contentEl.createEl('div', { 
+                text: '⚠️ ' + wakeLockSupport.message 
+            });
+            warningHint.addClass('wake-lock-warning');
+        }
+    }
+
+    /**
+     * 处理Wake Lock状态变化
+     */
+    private handleWakeLockChange(isActive: boolean, error?: string): void {
+        console.log(`Wake Lock状态变化: ${isActive ? '激活' : '释放'}`, error ? `错误: ${error}` : '');
+        
+        if (isActive) {
+            // Wake Lock激活
+            this.wakeLockIndicator.style.display = 'flex';
+            this.wakeLockText.setText('防锁屏已激活');
+            this.wakeLockIndicator.removeClass('wake-lock-error');
+            this.wakeLockIndicator.addClass('wake-lock-active');
+        } else {
+            if (error) {
+                // Wake Lock出错
+                this.wakeLockIndicator.style.display = 'flex';
+                this.wakeLockText.setText(`防锁屏失败: ${error}`);
+                this.wakeLockIndicator.removeClass('wake-lock-active');
+                this.wakeLockIndicator.addClass('wake-lock-error');
+                
+                // 显示手动保持屏幕开启的提示
+                if (this.detectIOS()) {
+                    this.showWakeLockFallbackHint();
+                }
+            } else {
+                // Wake Lock正常释放
+                this.wakeLockIndicator.style.display = 'none';
+                this.wakeLockIndicator.removeClass('wake-lock-active', 'wake-lock-error');
+            }
+        }
+    }
+
+    /**
+     * 显示Wake Lock失败后的备用提示
+     */
+    private showWakeLockFallbackHint(): void {
+        // 更新提示文字
+        const fallbackHint = '⚠️ 防锁屏功能不可用，录音时请手动保持屏幕开启';
+        
+        // 如果已经在录音，显示临时通知
+        if (this.state === 'recording' || this.state === 'paused') {
+            new Notice(fallbackHint);
+        }
+        
+        // 更新主提示文字
+        if (this.hintText) {
+            const originalText = this.hintText.textContent || '';
+            if (!originalText.includes('请手动保持屏幕开启')) {
+                this.hintText.setText(originalText + ' (录音时请手动保持屏幕开启)');
+            }
+        }
+    }
+
+    /**
+     * 获取Wake Lock状态信息（用于调试）
+     */
+    getWakeLockInfo(): string {
+        if (!this.audioRecorder) {
+            return 'AudioRecorder未初始化';
+        }
+        
+        const state = this.audioRecorder.getWakeLockState();
+        return `Wake Lock - 支持:${state.isSupported}, 激活:${state.isActive}, 启用:${state.isEnabled}`;
     }
 } 

@@ -20,5 +20,6 @@
   "includeOCRInNote": false,
   "showOriginalImages": true,
   "combineAudioAndOCR": true,
-  "maxImageSize": 10
+  "maxImageSize": 10,
+  "enableWakeLock": true
 }

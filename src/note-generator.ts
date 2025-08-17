@@ -35,7 +35,7 @@ export class NoteGenerator {
     constructor(private app: App) {}
 
     /**
-     * 生成增强的笔记内容（支持YAML front matter和结构化内容）
+     * 生成卡片式笔记内容 - 重新设计的简洁布局
      */
     generateEnhancedNoteContent(
         enhancedResult: EnhancedProcessingResult,
@@ -50,27 +50,45 @@ export class NoteGenerator {
         const smartTitle = this.formatSmartTitle(enhancedResult.smartTitle, metadata.timestamp);
         content += `# ${smartTitle}\n\n`;
 
-        // 生成三部分内容结构
-        
-        // 1. 原音频部分
-        if (metadata.audioFilePath) {
-            content += `## 🎧 原音频\n\n`;
-            content += `![[${metadata.audioFilePath}]]\n\n`;
-        }
-
-        // 2. 转录文字部分
-        content += `## 📝 转录文字\n\n`;
+        // 1. 用户想法区域 - 显示原始语音转录
+        content += `## 我的想法\n\n`;
         content += enhancedResult.originalText + '\n\n';
 
-        // 3. 笔记概要部分
-        content += `## 📋 笔记概要\n\n`;
-        content += enhancedResult.summary + '\n\n';
+        // 2. AI分析总结区域 - 显示LLM处理后的内容
+        if (enhancedResult.isProcessed) {
+            content += `## AI分析总结\n\n`;
+            
+            // 如果有处理后的文本且与原始文本不同，显示处理后的文本
+            if (enhancedResult.processedText && 
+                enhancedResult.processedText !== enhancedResult.originalText) {
+                content += enhancedResult.processedText + '\n\n';
+            }
+            
+            // 如果有单独的总结且与处理后文本不同，显示总结
+            if (enhancedResult.summary && 
+                enhancedResult.summary !== enhancedResult.processedText &&
+                enhancedResult.summary !== enhancedResult.originalText) {
+                content += `**核心要点：**\n${enhancedResult.summary}\n\n`;
+            }
+            
+            // 如果有标签，显示为Obsidian标签引用
+            if (enhancedResult.tags && enhancedResult.tags.length > 0) {
+                const tagLinks = enhancedResult.tags.map(tag => `#${this.normalizeTagName(tag)}`).join(' ');
+                content += `**标签：** ${tagLinks}\n\n`;
+            }
+        }
+
+        // 3. 录音文件链接
+        if (metadata.audioFilePath) {
+            content += `## 录音文件\n\n`;
+            content += `![[${metadata.audioFilePath}]]\n\n`;
+        }
 
         return content;
     }
 
     /**
-     * 生成YAML front matter
+     * 生成简化的YAML front matter - 只保留核心信息
      */
     private generateYAMLFrontMatter(
         enhancedResult: EnhancedProcessingResult,
@@ -79,41 +97,40 @@ export class NoteGenerator {
         const yaml = [];
         yaml.push('---');
         
-        // 基本信息
+        // 创建日期 - 核心元数据
         yaml.push(`created: ${this.formatObsidianDate(metadata.timestamp)}`);
-        yaml.push(`title: "${this.escapeYamlValue(this.formatSmartTitle(enhancedResult.smartTitle, metadata.timestamp))}"`);
-        yaml.push(`note_type: "voice_note"`);
         
-        if (metadata.duration) {
-            yaml.push(`duration: "${this.escapeYamlValue(metadata.duration)}"`);
+        // 标签 - 优先使用AI生成的标签
+        yaml.push('tags:');
+        if (enhancedResult.tags && enhancedResult.tags.length > 0) {
+            // 使用AI生成的内容标签
+            const validTags = enhancedResult.tags
+                .map(tag => this.normalizeTagName(tag))
+                .filter(tag => tag && tag.length > 0);
+                
+            if (validTags.length > 0) {
+                validTags.forEach(tag => {
+                    yaml.push(`  - "${tag}"`);
+                });
+            } else {
+                // 如果AI标签无效，使用基础标签
+                yaml.push('  - "语音笔记"');
+            }
+        } else {
+            // 如果没有AI标签，尝试使用结构化标签
+            const allTags = this.combineStructuredTags(enhancedResult.structuredTags);
+            if (allTags.length > 0) {
+                allTags.forEach(tag => {
+                    yaml.push(`  - "${tag}"`);
+                });
+            } else {
+                // 最后回退到基础标签
+                yaml.push('  - "语音笔记"');
+            }
         }
         
-        // 结构化标签
-        const allTags = this.combineStructuredTags(enhancedResult.structuredTags);
-        if (allTags.length > 0) {
-            yaml.push('tags:');
-            allTags.forEach(tag => {
-                yaml.push(`  - "${tag}"`);
-            });
-        }
-        
-        // AI处理信息
-        yaml.push(`ai_processed: ${enhancedResult.isProcessed}`);
-        yaml.push(`speech_model: "${metadata.model}"`);
-        
-        if (metadata.textModel && enhancedResult.isProcessed) {
-            yaml.push(`text_model: "${metadata.textModel}"`);
-        }
-        
-        // 音频文件信息
-        if (metadata.audioFileName) {
-            yaml.push(`audio_file: "${metadata.audioFilePath}"`);
-        }
-        
-        // 概要信息
-        if (enhancedResult.summary && enhancedResult.summary !== enhancedResult.originalText) {
-            yaml.push(`summary: "${this.escapeYamlValue(enhancedResult.summary)}"`);
-        }
+        // 笔记类型 - 用于过滤和组织
+        yaml.push(`type: "voice_note"`);
         
         yaml.push('---');
         yaml.push('');
@@ -122,84 +139,141 @@ export class NoteGenerator {
     }
 
     /**
-     * 生成多模态笔记内容（音频+图片+OCR）
+     * 生成卡片式多模态笔记内容 - 以用户想法为核心的布局
      */
     generateMultimodalNoteContent(
         multimodalContent: MultimodalContent,
-        options: NoteGenerationOptions
+        options: NoteGenerationOptions,
+        multimodalResult?: import('./text-processor').MultimodalProcessingResult
     ): string {
         let content = '';
 
-        // 生成YAML front matter
-        content += this.generateMultimodalYAMLFrontMatter(multimodalContent, options);
+        // 生成YAML front matter - 传递AI生成的标签
+        const aiTags = multimodalResult?.tags;
+        content += this.generateMultimodalYAMLFrontMatter(multimodalContent, options, aiTags);
         
-        // 生成标题
-        const title = this.formatMultimodalTitle(multimodalContent);
+        // 生成标题 - 使用智能标题而非默认时间标题
+        const title = this.formatMultimodalSmartTitle(multimodalContent);
         content += `# ${title}\n\n`;
 
-        // 音频部分
-        if (options.includeAudioSection && multimodalContent.audio) {
-            content += this.generateAudioSection(multimodalContent.audio, options.audioOptions);
+        // 1. 用户想法区域 - 显示原始语音转录
+        if (multimodalContent.audio && multimodalContent.audio.transcribedText) {
+            content += `## 我的想法\n\n`;
+            content += multimodalContent.audio.transcribedText + '\n\n';
         }
 
-        // 图片部分  
-        if (options.includeImageSection && multimodalContent.images && multimodalContent.images.items.length > 0) {
-            content += this.generateImageSection(multimodalContent.images, options.imageOptions);
+        // 2. AI分析总结区域 - 显示LLM处理后的内容
+        if (multimodalResult && multimodalResult.isProcessed) {
+            content += `## AI分析总结\n\n`;
+            
+            // 如果有处理后的文本且与原始文本不同，显示处理后的文本
+            if (multimodalResult.processedText && 
+                multimodalResult.processedText !== multimodalResult.audioText) {
+                content += multimodalResult.processedText + '\n\n';
+            }
+            
+            // 如果有单独的总结且与处理后文本不同，显示总结
+            if (multimodalResult.summary && 
+                multimodalResult.summary !== multimodalResult.processedText &&
+                multimodalResult.summary !== multimodalResult.audioText) {
+                content += `**核心要点：**\n${multimodalResult.summary}\n\n`;
+            }
+            
+            // 如果有标签，显示为Obsidian标签引用
+            if (multimodalResult.tags && multimodalResult.tags.length > 0) {
+                const tagLinks = multimodalResult.tags.map(tag => `#${this.normalizeTagName(tag)}`).join(' ');
+                content += `**标签：** ${tagLinks}\n\n`;
+            }
         }
 
-        // OCR文字识别部分
+        // 3. 参考内容区域 - 图片OCR内容
         if (options.includeOCRSection && multimodalContent.images && multimodalContent.images.totalOCRText) {
-            content += this.generateOCRSection(multimodalContent.images, options.imageOptions);
+            content += `## 参考内容\n\n`;
+            content += `> 来自图片的文字内容，作为想法的背景参考\n\n`;
+            content += multimodalContent.images.totalOCRText + '\n\n';
         }
 
-        // 综合分析部分
-        if (options.includeSummarySection && multimodalContent.combinedText) {
-            content += this.generateSummarySection(multimodalContent.combinedText, options.summaryOptions);
-        }
-
-        // 元数据部分
-        if (options.includeMetadata) {
-            content += this.generateMetadataSection(multimodalContent.metadata);
+        // 4. 相关文件区域 - 音频和图片链接
+        const hasFiles = (multimodalContent.audio && options.audioOptions.includeOriginalAudio) || 
+                         (multimodalContent.images && options.imageOptions.includeOriginalImages);
+        
+        if (hasFiles) {
+            content += `## 相关文件\n\n`;
+            
+            // 音频文件
+            if (options.includeAudioSection && multimodalContent.audio && options.audioOptions.includeOriginalAudio) {
+                if (multimodalContent.audio.audioFilePath) {
+                    content += `**录音**: ![[${multimodalContent.audio.audioFilePath}]]\n\n`;
+                }
+            }
+            
+            // 图片文件
+            if (options.includeImageSection && multimodalContent.images && options.imageOptions.includeOriginalImages) {
+                if (multimodalContent.images.items.length > 0) {
+                    content += `**图片**: `;
+                    const imageLinks = multimodalContent.images.items
+                        .map(image => this.getImageDisplayPath(image))
+                        .filter(path => path)
+                        .map(path => `![[${path}]]`)
+                        .join(' ');
+                    content += imageLinks + '\n\n';
+                }
+            }
         }
 
         return content;
     }
 
     /**
-     * 生成多模态YAML front matter
+     * 生成简化的多模态YAML front matter - 只保留核心信息
      */
     private generateMultimodalYAMLFrontMatter(
         content: MultimodalContent,
-        options: NoteGenerationOptions
+        options: NoteGenerationOptions,
+        aiTags?: string[]
     ): string {
         const yaml = [];
         yaml.push('---');
         
-        // 基本信息
+        // 创建日期 - 核心元数据
         yaml.push(`created: ${this.formatObsidianDate(content.metadata.createdAt)}`);
-        yaml.push(`title: "${this.escapeYamlValue(content.metadata.hasAudio ? '多模态语音笔记' : '图片笔记')}"`);
-        yaml.push(`note_type: "multimodal_note"`);
         
-        // 内容类型标记
-        yaml.push(`has_audio: ${content.metadata.hasAudio}`);
-        yaml.push(`has_images: ${content.metadata.hasImages}`);
-        yaml.push(`audio_count: ${content.metadata.audioCount}`);
-        yaml.push(`image_count: ${content.metadata.imageCount}`);
+        // 标签 - 优先使用AI生成的标签
+        yaml.push('tags:');
+        if (aiTags && aiTags.length > 0) {
+            // 使用AI生成的内容标签
+            const validTags = aiTags
+                .map(tag => this.normalizeTagName(tag))
+                .filter(tag => tag && tag.length > 0);
+                
+            if (validTags.length > 0) {
+                validTags.forEach(tag => {
+                    yaml.push(`  - "${tag}"`);
+                });
+            } else {
+                // 如果AI标签无效，使用类型标签
+                this.addFallbackTags(yaml, content);
+            }
+        } else {
+            // 如果没有AI标签，使用类型标签
+            if (content.metadata.hasAudio && content.metadata.hasImages) {
+                yaml.push('  - "多模态笔记"');
+                yaml.push('  - "语音笔记"');
+                yaml.push('  - "图片笔记"');
+            } else if (content.metadata.hasAudio) {
+                yaml.push('  - "语音笔记"');
+            } else if (content.metadata.hasImages) {
+                yaml.push('  - "图片笔记"');
+            }
+        }
         
-        // 模型信息
-        if (content.metadata.models.speechModel) {
-            yaml.push(`speech_model: "${content.metadata.models.speechModel}"`);
-        }
-        if (content.metadata.models.ocrModel) {
-            yaml.push(`ocr_model: "${content.metadata.models.ocrModel}"`);
-        }
-        if (content.metadata.models.textModel) {
-            yaml.push(`text_model: "${content.metadata.models.textModel}"`);
-        }
-        
-        // 处理时间
-        if (content.metadata.totalProcessingTime) {
-            yaml.push(`processing_time: "${content.metadata.totalProcessingTime}"`);
+        // 笔记类型 - 用于过滤和组织
+        if (content.metadata.hasAudio && content.metadata.hasImages) {
+            yaml.push(`type: "multimodal_note"`);
+        } else if (content.metadata.hasAudio) {
+            yaml.push(`type: "voice_note"`);
+        } else {
+            yaml.push(`type: "image_note"`);
         }
         
         yaml.push('---');
@@ -215,14 +289,14 @@ export class NoteGenerator {
         audioData: NonNullable<MultimodalContent['audio']>,
         options: NoteGenerationOptions['audioOptions']
     ): string {
-        let content = `## 🎧 语音录音\n\n`;
+        let content = `## 语音录音\n\n`;
         
         if (options.includeOriginalAudio && audioData.audioFilePath) {
             content += `![[${audioData.audioFilePath}]]\n\n`;
         }
         
         if (audioData.duration) {
-            content += `> 📊 录音时长: ${audioData.duration}`;
+            content += `> 录音时长: ${audioData.duration}`;
             if (audioData.processingTime) {
                 content += ` | 处理时长: ${audioData.processingTime}`;
             }
@@ -230,7 +304,7 @@ export class NoteGenerator {
         }
 
         if (options.showTranscription && audioData.transcribedText) {
-            content += `### 📝 语音转录\n\n`;
+            content += `### 语音转录\n\n`;
             content += audioData.transcribedText + '\n\n';
         }
         
@@ -244,7 +318,7 @@ export class NoteGenerator {
         imageData: NonNullable<MultimodalContent['images']>,
         options: NoteGenerationOptions['imageOptions']
     ): string {
-        let content = `## 📷 图片内容\n\n`;
+        let content = `## 图片内容\n\n`;
         
         if (options.includeOriginalImages && imageData.items.length > 0) {
             imageData.items.forEach((image, index) => {
@@ -257,7 +331,7 @@ export class NoteGenerator {
                 }
                 
                 // 显示图片信息
-                content += `> 📊 文件大小: ${this.formatFileSize(image.fileSize)} | 类型: ${image.fileType}\n\n`;
+                content += `> 文件大小: ${this.formatFileSize(image.fileSize)} | 类型: ${image.fileType}\n\n`;
             });
         }
         
@@ -271,7 +345,7 @@ export class NoteGenerator {
         imageData: NonNullable<MultimodalContent['images']>,
         options: NoteGenerationOptions['imageOptions']
     ): string {
-        let content = `## 🔍 文字识别结果\n\n`;
+        let content = `## 文字识别结果\n\n`;
         
         if (options.showOCRText && imageData.ocrResults.size > 0) {
             imageData.items.forEach((image, index) => {
@@ -285,7 +359,7 @@ export class NoteGenerator {
             
             // 合并的OCR文字
             if (imageData.totalOCRText && imageData.totalOCRText.trim()) {
-                content += `### 📋 所有图片文字汇总\n\n`;
+                content += `### 所有图片文字汇总\n\n`;
                 content += imageData.totalOCRText + '\n\n';
             }
         }
@@ -300,21 +374,21 @@ export class NoteGenerator {
         combinedText: string,
         options: NoteGenerationOptions['summaryOptions']
     ): string {
-        let content = `## 📋 内容分析\n\n`;
+        let content = `## 内容分析\n\n`;
         
         if (options.combineAudioAndOCR) {
-            content += `### 🔄 综合处理\n\n`;
+            content += `### 综合处理\n\n`;
             content += '> 以下内容基于语音转录和图片文字识别的综合分析\n\n';
         }
         
         if (options.generateSummary) {
-            content += `### 📝 内容摘要\n\n`;
+            content += `### 内容摘要\n\n`;
             content += combinedText + '\n\n';
         }
         
         if (options.generateTags) {
             // 这里可以添加基于综合内容生成的标签
-            content += `### 🏷️ 相关标签\n\n`;
+            content += `### 相关标签\n\n`;
             content += '#多模态笔记 #AI处理\n\n';
         }
         
@@ -325,7 +399,7 @@ export class NoteGenerator {
      * 生成元数据部分
      */
     private generateMetadataSection(metadata: MultimodalContent['metadata']): string {
-        let content = `## 📊 处理信息\n\n`;
+        let content = `## 处理信息\n\n`;
         
         const info = [];
         info.push(`**创建时间**: ${metadata.createdAt.toLocaleString()}`);
@@ -384,6 +458,45 @@ export class NoteGenerator {
     }
 
     /**
+     * 格式化多模态智能标题 - 尝试从内容提取有意义的标题
+     */
+    private formatMultimodalSmartTitle(content: MultimodalContent): string {
+        const dateStr = content.metadata.createdAt.toLocaleDateString('zh-CN', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit'
+        }).replace(/\//g, '-');
+        
+        const timeStr = content.metadata.createdAt.toLocaleTimeString('zh-CN', {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+        });
+        
+        // 尝试从组合文本或音频文本中提取标题
+        let smartTitle = '';
+        if (content.combinedText && content.combinedText.trim()) {
+            smartTitle = this.extractTitleFromContent(content.combinedText);
+        } else if (content.audio && content.audio.transcribedText) {
+            smartTitle = this.extractTitleFromContent(content.audio.transcribedText);
+        }
+        
+        // 如果提取失败，使用类型标签
+        if (!smartTitle || smartTitle === '语音笔记') {
+            const typeLabels = [];
+            if (content.metadata.hasAudio) typeLabels.push('语音');
+            if (content.metadata.hasImages) typeLabels.push('图片');
+            const typeLabel = typeLabels.length > 1 ? '多模态' : typeLabels[0] || '笔记';
+            smartTitle = `${typeLabel}笔记`;
+        }
+        
+        // 清理智能标题
+        smartTitle = this.cleanSmartTitle(smartTitle);
+        
+        return `${dateStr} ${timeStr} - ${smartTitle}`;
+    }
+
+    /**
      * 获取图片显示路径
      */
     private getImageDisplayPath(image: ImageItem): string | null {
@@ -436,13 +549,45 @@ export class NoteGenerator {
      * 规范化标签名称，确保Obsidian兼容性
      */
     private normalizeTagName(tagName: string): string {
-        return tagName
+        if (!tagName || typeof tagName !== 'string') {
+            return '';
+        }
+        
+        let normalized = tagName
             .trim()
-            .replace(/\s+/g, '-')        // 空格替换为连字符
+            .replace(/^#/, '')           // 移除可能存在的#前缀
+            .replace(/\s+/g, '')         // 移除所有空格（中文标签不需要连字符）
             .replace(/[\/\\]/g, '-')     // 斜杠替换为连字符
-            .replace(/[^\w\u4e00-\u9fa5-]/g, '') // 只保留字母、数字、中文和连字符
+            .replace(/[^\w\u4e00-\u9fa5\u3040-\u309f\u30a0-\u30ff-]/g, '') // 保留字母、数字、中文、假名和连字符
             .replace(/-+/g, '-')         // 多个连字符合并为一个
             .replace(/^-|-$/g, '');      // 移除开头和结尾的连字符
+            
+        // 如果处理后为空或过短，返回空字符串
+        if (!normalized || normalized.length < 1) {
+            return '';
+        }
+        
+        // 限制标签长度
+        if (normalized.length > 15) {
+            normalized = normalized.substring(0, 15);
+        }
+        
+        return normalized;
+    }
+
+    /**
+     * 添加后备标签
+     */
+    private addFallbackTags(yaml: string[], content: MultimodalContent): void {
+        if (content.metadata.hasAudio && content.metadata.hasImages) {
+            yaml.push('  - "多模态笔记"');
+            yaml.push('  - "语音笔记"');
+            yaml.push('  - "图片笔记"');
+        } else if (content.metadata.hasAudio) {
+            yaml.push('  - "语音笔记"');
+        } else if (content.metadata.hasImages) {
+            yaml.push('  - "图片笔记"');
+        }
     }
 
     /**
@@ -471,7 +616,7 @@ export class NoteGenerator {
     }
 
     /**
-     * 格式化智能标题
+     * 格式化智能标题 - 时间戳 + LLM生成的内容标题
      */
     private formatSmartTitle(smartTitle: string, timestamp: Date): string {
         const dateStr = timestamp.toLocaleDateString('zh-CN', {
@@ -486,7 +631,46 @@ export class NoteGenerator {
             hour12: false
         });
         
-        return `${dateStr} ${timeStr} - ${smartTitle}`;
+        // 清理和优化LLM生成的标题
+        const cleanTitle = this.cleanSmartTitle(smartTitle);
+        
+        return `${dateStr} ${timeStr} - ${cleanTitle}`;
+    }
+
+    /**
+     * 清理和优化智能标题
+     */
+    private cleanSmartTitle(title: string): string {
+        if (!title || title.trim().length === 0) {
+            return '语音笔记';
+        }
+        
+        let cleaned = title.trim();
+        
+        // 移除常见的AI生成前缀
+        const prefixesToRemove = [
+            '标题：', '题目：', '主题：', '内容：', '关于：',
+            '标题:', '题目:', '主题:', '内容:', '关于:',
+            'Title:', 'Subject:', 'Topic:', 'About:'
+        ];
+        
+        for (const prefix of prefixesToRemove) {
+            if (cleaned.startsWith(prefix)) {
+                cleaned = cleaned.substring(prefix.length).trim();
+                break;
+            }
+        }
+        
+        // 移除引号
+        cleaned = cleaned.replace(/^["'「『]|["'」』]$/g, '');
+        
+        // 限制长度到25个字符，保持标题简洁
+        if (cleaned.length > 25) {
+            cleaned = cleaned.substring(0, 22) + '...';
+        }
+        
+        // 如果清理后为空，使用默认标题
+        return cleaned.length > 0 ? cleaned : '语音笔记';
     }
 
     /**
@@ -513,9 +697,9 @@ export class NoteGenerator {
 
         // 音频文件链接（如果有）
         if (metadata.audioFilePath) {
-            content += `## 🎧 原音频\n\n`;
+            content += `## 原音频\n\n`;
             content += `![[${metadata.audioFilePath}]]\n\n`;
-            content += `> 💾 音频文件: ${metadata.audioFileName || '未知'}\n\n`;
+            content += `> 音频文件: ${metadata.audioFileName || '未知'}\n\n`;
         }
 
         // 简化的元数据（可选）
@@ -533,7 +717,7 @@ export class NoteGenerator {
 
         // 添加处理状态说明
         if (processedContent.isProcessed) {
-            content += '> ✅ 此内容已通过AI优化处理\n\n';
+            content += '> 此内容已通过AI优化处理\n\n';
         }
 
         // 添加处理后的内容

@@ -507,18 +507,18 @@ export class DashScopeClient {
         }
     }
 
-    // 文本整理和优化
+    // 文本整理和优化 - 强调这是用户的想法和思考
     private async improveText(text: string, model: string): Promise<string> {
         const request: CompatibleRequest = {
             model,
             messages: [
                 {
                     role: 'system',
-                    content: '你是一个专业的文本编辑助手。请对用户提供的语音转录文本进行整理和优化，要求：1. 修正语法错误和口语化表达 2. 保持原始内容的完整性和原意 3. 优化表达方式，使其更加清晰易读 4. 保持逻辑结构和重要信息不变 5. 使用规范的标点符号 6. 输出格式为规整的中文文本'
+                    content: '你是一个专业的思想整理助手。用户通过语音表达了他们的想法、感受和思考，请帮助整理这些内容。要求：1. 这是用户的个人想法，请保持第一人称的表达方式 2. 修正语音转录中的语法错误和口语化表达 3. 保持用户的原始观点、情感和意图完全不变 4. 优化表达逻辑，使想法更清晰易懂 5. 保持用户的语气和个人风格 6. 使用自然流畅的中文表达'
                 },
                 {
                     role: 'user',
-                    content: `请对以下语音转录文本进行整理和优化：\n\n${text}`
+                    content: `请整理我的以下想法和思考：\n\n${text}`
                 }
             ]
         };
@@ -527,18 +527,18 @@ export class DashScopeClient {
         return response.choices[0]?.message?.content || text;
     }
 
-    // 生成相关标签
+    // 生成具体标签 - 基于用户内容的关键词分析
     private async generateTags(text: string, model: string): Promise<string[]> {
         const request: CompatibleRequest = {
             model,
             messages: [
                 {
                     role: 'system',
-                    content: '你是一个专业的内容分析助手。请分析用户提供的文本内容，生成3-5个相关的标签。要求：1. 标签应该准确反映文本的主要内容和主题 2. 使用简洁的中文词汇 3. 避免过于宽泛或过于具体的标签 4. 标签之间用逗号分隔 5. 不需要添加#符号，只输出标签文字'
+                    content: '你是一个专业的内容标签生成助手。请根据用户的内容提取3-5个具体的标签关键词。要求：1. 直接提取内容中的核心概念、主题或关键词 2. 使用简洁的名词或短语（2-4个字） 3. 避免使用"相关主题"、"内容分析"等通用词汇 4. 关注具体的事物、概念、行动或领域 5. 用逗号分隔，只返回标签词汇，不要其他解释文字'
                 },
                 {
                     role: 'user',
-                    content: `请为以下文本生成相关标签：\n\n${text}`
+                    content: `请从以下内容中提取具体的标签关键词：\n\n${text}`
                 }
             ]
         };
@@ -546,11 +546,40 @@ export class DashScopeClient {
         const response = await this.callCompatibleAPI(request);
         const tagsText = response.choices[0]?.message?.content || '';
         
+        console.log('AI生成的标签原始文本:', tagsText);
+        
         // 解析标签，按逗号分割并清理
-        return tagsText.split(/[,，、]/)
+        const tags = tagsText.split(/[,，、]/)
             .map(tag => tag.trim())
+            .map(tag => tag.replace(/^["'"`'"]/g, '').replace(/["'"`'"]$/g, '')) // 移除引号
             .filter(tag => tag.length > 0)
+            .filter(tag => !this.isInvalidTag(tag)) // 过滤无效标签
             .slice(0, 5); // 最多5个标签
+            
+        console.log('清理后的标签:', tags);
+        return tags;
+    }
+
+    /**
+     * 检查是否为无效标签
+     */
+    private isInvalidTag(tag: string): boolean {
+        const invalidPatterns = [
+            /^相关主题$/,
+            /^内容分析$/,
+            /^主题标签$/,
+            /^标签$/,
+            /^主题$/,
+            /^分析$/,
+            /^内容$/,
+            /^关键词$/,
+            /^以下是?.*标签/,
+            /^根据.*内容/,
+            /^\d+[\.\、]/,  // 数字开头的列表项
+            /^[\-\*\+]\s/,  // 列表符号
+        ];
+        
+        return invalidPatterns.some(pattern => pattern.test(tag)) || tag.length < 2 || tag.length > 10;
     }
 
     // 调用兼容模式API

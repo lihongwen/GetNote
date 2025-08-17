@@ -29,6 +29,8 @@ export interface GetNoteSettings {
     showOriginalImages: boolean;
     combineAudioAndOCR: boolean;
     maxImageSize: number; // MB
+    // Wake Lock防锁屏设置
+    enableWakeLock: boolean;
 }
 
 export const DEFAULT_SETTINGS: GetNoteSettings = {
@@ -56,7 +58,9 @@ export const DEFAULT_SETTINGS: GetNoteSettings = {
     includeOCRInNote: true,
     showOriginalImages: true,
     combineAudioAndOCR: true,
-    maxImageSize: 10 // 10MB
+    maxImageSize: 10, // 10MB
+    // Wake Lock防锁屏默认设置
+    enableWakeLock: true
 };
 
 export class GetNoteSettingTab extends PluginSettingTab {
@@ -355,6 +359,63 @@ export class GetNoteSettingTab extends PluginSettingTab {
                     this.plugin.settings.keepOriginalAudio = value;
                     await this.plugin.saveSettings();
                 }));
+
+        // Wake Lock防锁屏设置
+        const wakeLockSetting = new Setting(containerEl)
+            .setName('防锁屏功能')
+            .setDesc('录音时自动防止设备锁屏，确保录音不被中断（适用于支持Wake Lock API的现代浏览器）')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.enableWakeLock)
+                .onChange(async (value) => {
+                    this.plugin.settings.enableWakeLock = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        // 添加Wake Lock支持状态检查
+        this.addWakeLockStatus(wakeLockSetting.settingEl);
+    }
+
+    /**
+     * 添加Wake Lock支持状态显示
+     */
+    private addWakeLockStatus(settingEl: HTMLElement): void {
+        // 导入AudioRecorder以使用其静态方法
+        import('./recorder').then(({ AudioRecorder }) => {
+            const wakeLockSupport = AudioRecorder.checkWakeLockSupport();
+            
+            const statusDiv = settingEl.createDiv('wake-lock-status');
+            statusDiv.style.marginTop = '8px';
+            statusDiv.style.padding = '8px';
+            statusDiv.style.borderRadius = '4px';
+            statusDiv.style.fontSize = '0.85rem';
+            
+            if (wakeLockSupport.isSupported) {
+                statusDiv.style.backgroundColor = 'rgba(0, 200, 0, 0.1)';
+                statusDiv.style.color = 'var(--color-green)';
+                statusDiv.style.border = '1px solid rgba(0, 200, 0, 0.3)';
+                statusDiv.textContent = `✅ ${wakeLockSupport.message}`;
+            } else {
+                statusDiv.style.backgroundColor = 'rgba(255, 140, 0, 0.1)';
+                statusDiv.style.color = 'var(--color-orange)';
+                statusDiv.style.border = '1px solid rgba(255, 140, 0, 0.3)';
+                statusDiv.textContent = `⚠️ ${wakeLockSupport.message}`;
+            }
+
+            // 添加详细信息
+            const detailsDiv = statusDiv.createDiv();
+            detailsDiv.style.marginTop = '4px';
+            detailsDiv.style.fontSize = '0.75rem';
+            detailsDiv.style.opacity = '0.8';
+            
+            const details = [
+                `浏览器: ${wakeLockSupport.isSafari ? 'Safari' : '其他'}`,
+                `设备: ${wakeLockSupport.isIOS ? 'iOS' : '非iOS'}`,
+                `协议: ${wakeLockSupport.isHTTPS ? 'HTTPS' : 'HTTP'}`
+            ];
+            detailsDiv.textContent = details.join(' | ');
+        }).catch(error => {
+            console.error('加载AudioRecorder模块失败:', error);
+        });
     }
 
     private createOutputSettings(containerEl: HTMLElement): void {

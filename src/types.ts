@@ -4,6 +4,28 @@ import { ImageItem } from './image-manager';
 import { OCRResult, BatchOCRResult } from './api-client';
 
 // ================================
+// Wake Lock API的全局类型声明
+// ================================
+
+declare global {
+    interface Navigator {
+        wakeLock?: WakeLock;
+    }
+
+    interface WakeLock {
+        request(type: 'screen'): Promise<WakeLockSentinel>;
+    }
+
+    interface WakeLockSentinel extends EventTarget {
+        readonly released: boolean;
+        readonly type: 'screen';
+        release(): Promise<void>;
+        addEventListener(type: 'release', listener: (event: Event) => void): void;
+        removeEventListener(type: 'release', listener: (event: Event) => void): void;
+    }
+}
+
+// ================================
 // 扩展录音状态，添加OCR处理状态
 // ================================
 
@@ -313,6 +335,40 @@ export interface ProcessingStatistics {
         llmProcessingTime?: number;
     };
 }
+
+// ================================
+// Wake Lock API相关接口
+// ================================
+
+// Wake Lock状态接口
+export interface WakeLockState {
+    isSupported: boolean;
+    isActive: boolean;
+    wakeLock: WakeLockSentinel | null;
+    error?: string;
+}
+
+// Wake Lock选项接口
+export interface WakeLockOptions {
+    enabled: boolean;
+    type: 'screen'; // 目前只支持screen类型
+    onActivated?: () => void;
+    onReleased?: () => void;
+    onError?: (error: any) => void;
+}
+
+// Wake Lock事件接口
+export interface WakeLockEvent {
+    type: 'activated' | 'released' | 'error' | 'not_supported';
+    timestamp: Date;
+    error?: any;
+}
+
+// ================================
+// 扩展录音状态，添加Wake Lock状态
+// ================================
+
+export type RecordingStateWithWakeLock = ExtendedRecordingState | 'wake-lock-activating' | 'wake-lock-failed';
 
 // ================================
 // 导出所有接口

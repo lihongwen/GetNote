@@ -7,6 +7,9 @@ var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
@@ -21,6 +24,480 @@ var __copyProps = (to, from, except, desc) => {
 };
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
+// src/recorder.ts
+var recorder_exports = {};
+__export(recorder_exports, {
+  AudioRecorder: () => AudioRecorder
+});
+var AudioRecorder;
+var init_recorder = __esm({
+  "src/recorder.ts"() {
+    AudioRecorder = class {
+      constructor(onDataAvailable, onError, options) {
+        this.onDataAvailable = onDataAvailable;
+        this.onError = onError;
+        this.mediaRecorder = null;
+        this.audioChunks = [];
+        this.stream = null;
+        this.isRecording = false;
+        this.isPaused = false;
+        this.startTime = 0;
+        this.pausedDuration = 0;
+        this.pauseStartTime = 0;
+        // iOS特定状态管理
+        this.isIOS = false;
+        this.permissionLastGranted = 0;
+        this.permissionExpiryMs = 60 * 1e3;
+        // iOS权限60秒过期
+        this.audioContext = null;
+        // Wake Lock状态管理
+        this.wakeLock = null;
+        this.wakeLockEnabled = true;
+        /**
+         * 处理页面可见性变化（重要：页面隐藏后显示需要重新请求Wake Lock）
+         */
+        this.handleVisibilityChange = async () => {
+          if (document.visibilityState === "visible" && this.isRecording && this.wakeLockEnabled && !this.isWakeLockActive()) {
+            console.log("\u9875\u9762\u91CD\u65B0\u53EF\u89C1\uFF0C\u91CD\u65B0\u8BF7\u6C42Wake Lock");
+            await this.requestWakeLock();
+          }
+        };
+        this.isIOS = this.detectIOS();
+        if ((options == null ? void 0 : options.enableWakeLock) !== void 0) {
+          this.wakeLockEnabled = options.enableWakeLock;
+        }
+        if (options == null ? void 0 : options.onWakeLockChange) {
+          this.onWakeLockChange = options.onWakeLockChange;
+        }
+        this.initVisibilityListener();
+      }
+      async startRecording() {
+        if (this.isRecording) {
+          throw new Error("\u5DF2\u5728\u5F55\u97F3\u4E2D");
+        }
+        try {
+          if (this.isIOS) {
+            await this.ensureIOSPermission();
+          }
+          const audioConstraints = this.getAudioConstraints();
+          this.stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
+          if (this.isIOS && !this.audioContext) {
+            this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            if (this.audioContext.state === "suspended") {
+              await this.audioContext.resume();
+            }
+          }
+          const mimeType = this.getSupportedMimeType();
+          this.mediaRecorder = new MediaRecorder(this.stream, {
+            mimeType
+          });
+          this.audioChunks = [];
+          this.mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+              this.audioChunks.push(event.data);
+            }
+          };
+          this.mediaRecorder.onstop = () => {
+            const audioBlob = new Blob(this.audioChunks, {
+              type: mimeType
+            });
+            this.onDataAvailable(audioBlob);
+            this.cleanup();
+          };
+          this.mediaRecorder.onerror = (event) => {
+            const errorMsg = this.getErrorMessage(event);
+            this.onError(new Error(errorMsg));
+            this.cleanup();
+          };
+          this.mediaRecorder.start(this.isIOS ? 100 : 1e3);
+          this.isRecording = true;
+          this.isPaused = false;
+          this.startTime = Date.now();
+          this.pausedDuration = 0;
+          if (this.isIOS) {
+            this.permissionLastGranted = Date.now();
+          }
+          if (this.wakeLockEnabled) {
+            await this.requestWakeLock();
+          }
+        } catch (error) {
+          this.onError(new Error(`\u65E0\u6CD5\u542F\u52A8\u5F55\u97F3: ${error.message}`));
+          this.cleanup();
+          throw error;
+        }
+      }
+      stopRecording() {
+        if (this.mediaRecorder && this.isRecording) {
+          this.mediaRecorder.stop();
+          this.isRecording = false;
+          this.isPaused = false;
+          this.releaseWakeLock();
+        }
+      }
+      pauseRecording() {
+        if (this.mediaRecorder && this.isRecording && !this.isPaused) {
+          this.mediaRecorder.pause();
+          this.isPaused = true;
+          this.pauseStartTime = Date.now();
+        }
+      }
+      resumeRecording() {
+        if (this.mediaRecorder && this.isRecording && this.isPaused) {
+          this.mediaRecorder.resume();
+          this.isPaused = false;
+          this.pausedDuration += Date.now() - this.pauseStartTime;
+        }
+      }
+      getRecordingState() {
+        return this.isRecording;
+      }
+      getPausedState() {
+        return this.isPaused;
+      }
+      cleanup() {
+        if (this.stream) {
+          this.stream.getTracks().forEach((track) => track.stop());
+          this.stream = null;
+        }
+        if (this.isIOS && this.audioContext) {
+          try {
+            this.audioContext.suspend();
+          } catch (error) {
+            console.warn("AudioContext suspend failed:", error);
+          }
+        }
+        this.releaseWakeLock();
+        this.cleanupVisibilityListener();
+        this.mediaRecorder = null;
+        this.isRecording = false;
+        this.isPaused = false;
+        this.audioChunks = [];
+        this.startTime = 0;
+        this.pausedDuration = 0;
+        this.pauseStartTime = 0;
+      }
+      getSupportedMimeType() {
+        const types = this.isIOS ? [
+          "audio/mp4",
+          "audio/mp4;codecs=mp4a.40.2",
+          "audio/webm;codecs=opus",
+          "audio/webm",
+          "audio/wav"
+        ] : [
+          "audio/webm;codecs=opus",
+          "audio/webm",
+          "audio/ogg;codecs=opus",
+          "audio/ogg",
+          "audio/mp4",
+          "audio/wav",
+          "audio/mpeg"
+        ];
+        for (const type of types) {
+          if (MediaRecorder.isTypeSupported(type)) {
+            console.log(`\u9009\u62E9\u97F3\u9891\u683C\u5F0F: ${type}`);
+            return type;
+          }
+        }
+        const defaultType = this.isIOS ? "audio/mp4" : "audio/webm";
+        console.log(`\u4F7F\u7528\u9ED8\u8BA4\u97F3\u9891\u683C\u5F0F: ${defaultType}`);
+        return defaultType;
+      }
+      // 获取录音时长（毫秒）
+      getRecordingDuration() {
+        if (!this.isRecording) {
+          return 0;
+        }
+        const currentTime = Date.now();
+        let totalDuration = currentTime - this.startTime - this.pausedDuration;
+        if (this.isPaused) {
+          totalDuration -= currentTime - this.pauseStartTime;
+        }
+        return Math.max(0, totalDuration);
+      }
+      // 检查浏览器是否支持录音
+      static isSupported() {
+        return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
+      }
+      // 检查麦克风权限
+      static async checkMicrophonePermission() {
+        const isIOS = AudioRecorder.detectIOSStatic();
+        try {
+          if (isIOS) {
+            try {
+              const stream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                  echoCancellation: true,
+                  noiseSuppression: true,
+                  autoGainControl: true
+                }
+              });
+              stream.getTracks().forEach((track) => track.stop());
+              return true;
+            } catch (error) {
+              console.log("iOS\u9EA6\u514B\u98CE\u6743\u9650\u68C0\u67E5\u5931\u8D25:", error);
+              return false;
+            }
+          }
+          const result = await navigator.permissions.query({ name: "microphone" });
+          return result.state === "granted";
+        } catch (error) {
+          try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            stream.getTracks().forEach((track) => track.stop());
+            return true;
+          } catch (e) {
+            return false;
+          }
+        }
+      }
+      /**
+       * 检测是否为iOS设备
+       */
+      detectIOS() {
+        return AudioRecorder.detectIOSStatic();
+      }
+      /**
+       * 静态方法：检测是否为iOS设备
+       */
+      static detectIOSStatic() {
+        var _a;
+        if (typeof navigator === "undefined")
+          return false;
+        const userAgent = navigator.userAgent.toLowerCase();
+        const platform = ((_a = navigator.platform) == null ? void 0 : _a.toLowerCase()) || "";
+        return /iphone|ipad|ipod/.test(userAgent) || /iphone|ipad|ipod/.test(platform) || // 检测iOS 13+ Safari桌面模式
+        platform === "mactel" && navigator.maxTouchPoints > 1;
+      }
+      /**
+       * iOS特定权限确保机制
+       */
+      async ensureIOSPermission() {
+        const now = Date.now();
+        if (this.permissionLastGranted > 0 && now - this.permissionLastGranted > this.permissionExpiryMs) {
+          console.log("iOS\u6743\u9650\u53EF\u80FD\u5DF2\u8FC7\u671F\uFF0C\u9700\u8981\u91CD\u65B0\u7533\u8BF7");
+          this.permissionLastGranted = 0;
+        }
+        if (this.permissionLastGranted === 0) {
+          try {
+            const testStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            testStream.getTracks().forEach((track) => track.stop());
+            this.permissionLastGranted = now;
+            console.log("iOS\u6743\u9650\u7533\u8BF7\u6210\u529F");
+          } catch (error) {
+            throw new Error(`\u9EA6\u514B\u98CE\u6743\u9650\u88AB\u62D2\u7EDD\u6216\u4E0D\u53EF\u7528\u3002\u8BF7\u5728Safari\u8BBE\u7F6E\u4E2D\u5141\u8BB8\u6B64\u7F51\u7AD9\u8BBF\u95EE\u9EA6\u514B\u98CE\uFF0C\u7136\u540E\u91CD\u8BD5\u3002\u9519\u8BEF\u8BE6\u60C5: ${error.message}`);
+          }
+        }
+      }
+      /**
+       * 获取适合iOS的音频约束
+       */
+      getAudioConstraints() {
+        if (this.isIOS) {
+          return {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            // iOS特定设置
+            sampleRate: { ideal: 44100, min: 22050 },
+            sampleSize: { ideal: 16 },
+            channelCount: { ideal: 1 }
+            // 单声道以减少处理负担
+          };
+        } else {
+          return {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            sampleRate: 44100
+          };
+        }
+      }
+      /**
+       * 获取详细的错误信息
+       */
+      getErrorMessage(event) {
+        const error = event.error;
+        if (this.isIOS) {
+          if (error.name === "NotAllowedError") {
+            return `\u9EA6\u514B\u98CE\u6743\u9650\u88AB\u62D2\u7EDD\u3002\u8BF7\u5728Safari\u8BBE\u7F6E\u4E2D\u5141\u8BB8\u6B64\u7F51\u7AD9\u8BBF\u95EE\u9EA6\u514B\u98CE\uFF0C\u7136\u540E\u5237\u65B0\u9875\u9762\u91CD\u8BD5\u3002`;
+          } else if (error.name === "NotFoundError") {
+            return `\u672A\u627E\u5230\u9EA6\u514B\u98CE\u8BBE\u5907\u3002\u8BF7\u68C0\u67E5\u8BBE\u5907\u662F\u5426\u6B63\u786E\u8FDE\u63A5\u3002`;
+          } else if (error.name === "NotSupportedError") {
+            return `\u5F53\u524DiOS\u7248\u672C\u4E0D\u652F\u6301\u5F55\u97F3\u529F\u80FD\u3002\u8BF7\u66F4\u65B0\u5230\u6700\u65B0\u7248\u672C\u7684Safari\u3002`;
+          } else if (error.name === "SecurityError") {
+            return `\u5B89\u5168\u9650\u5236\u963B\u6B62\u5F55\u97F3\u3002\u8BF7\u786E\u4FDD\u5728HTTPS\u73AF\u5883\u4E0B\u4F7F\u7528\u6B64\u529F\u80FD\u3002`;
+          }
+        }
+        return `\u5F55\u97F3\u9519\u8BEF: ${error.name} - ${error.message}`;
+      }
+      /**
+       * 检查iOS权限是否仍然有效
+       */
+      isIOSPermissionValid() {
+        if (!this.isIOS || this.permissionLastGranted === 0) {
+          return false;
+        }
+        const now = Date.now();
+        return now - this.permissionLastGranted < this.permissionExpiryMs;
+      }
+      /**
+       * iOS特定的权限状态检查
+       */
+      static async checkIOSMicrophoneStatus() {
+        const isIOS = AudioRecorder.detectIOSStatic();
+        if (!isIOS) {
+          return { supported: false, hasPermission: false, error: "\u975EiOS\u8BBE\u5907" };
+        }
+        try {
+          if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            return { supported: false, hasPermission: false, error: "\u6D4F\u89C8\u5668\u4E0D\u652F\u6301\u5F55\u97F3" };
+          }
+          if (!window.MediaRecorder) {
+            return { supported: false, hasPermission: false, error: "\u6D4F\u89C8\u5668\u4E0D\u652F\u6301MediaRecorder" };
+          }
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          stream.getTracks().forEach((track) => track.stop());
+          return { supported: true, hasPermission: true };
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : "\u672A\u77E5\u9519\u8BEF";
+          return { supported: true, hasPermission: false, error: errorMsg };
+        }
+      }
+      // ================================
+      // Wake Lock API方法
+      // ================================
+      /**
+       * 请求Wake Lock防锁屏
+       */
+      async requestWakeLock() {
+        if (!this.isWakeLockSupported()) {
+          console.log("\u8BBE\u5907\u4E0D\u652F\u6301Wake Lock API\uFF0C\u8DF3\u8FC7\u9632\u9501\u5C4F\u8BBE\u7F6E");
+          this.notifyWakeLockChange(false, "\u8BBE\u5907\u4E0D\u652F\u6301Wake Lock API");
+          return;
+        }
+        try {
+          if (this.wakeLock) {
+            await this.wakeLock.release();
+          }
+          this.wakeLock = await navigator.wakeLock.request("screen");
+          console.log("Wake Lock\u5DF2\u6FC0\u6D3B\uFF0C\u5C4F\u5E55\u5C06\u4FDD\u6301\u4EAE\u8D77");
+          this.wakeLock.addEventListener("release", () => {
+            console.log("Wake Lock\u5DF2\u91CA\u653E");
+            this.wakeLock = null;
+            this.notifyWakeLockChange(false);
+          });
+          this.notifyWakeLockChange(true);
+        } catch (error) {
+          console.error("\u8BF7\u6C42Wake Lock\u5931\u8D25:", error);
+          const errorMessage = error instanceof Error ? error.message : "\u672A\u77E5\u9519\u8BEF";
+          this.notifyWakeLockChange(false, errorMessage);
+        }
+      }
+      /**
+       * 释放Wake Lock
+       */
+      releaseWakeLock() {
+        if (this.wakeLock) {
+          this.wakeLock.release().then(() => {
+            console.log("Wake Lock\u5DF2\u4E3B\u52A8\u91CA\u653E");
+            this.wakeLock = null;
+            this.notifyWakeLockChange(false);
+          }).catch((error) => {
+            console.error("\u91CA\u653EWake Lock\u65F6\u51FA\u9519:", error);
+            this.wakeLock = null;
+            this.notifyWakeLockChange(false, (error == null ? void 0 : error.message) || "\u672A\u77E5\u9519\u8BEF");
+          });
+        }
+      }
+      /**
+       * 检查Wake Lock API是否支持
+       */
+      isWakeLockSupported() {
+        return "wakeLock" in navigator && "request" in navigator.wakeLock;
+      }
+      /**
+       * 检查Wake Lock是否激活
+       */
+      isWakeLockActive() {
+        return this.wakeLock !== null && !this.wakeLock.released;
+      }
+      /**
+       * 获取Wake Lock状态
+       */
+      getWakeLockState() {
+        return {
+          isSupported: this.isWakeLockSupported(),
+          isActive: this.isWakeLockActive(),
+          isEnabled: this.wakeLockEnabled
+        };
+      }
+      /**
+       * 设置Wake Lock启用状态
+       */
+      setWakeLockEnabled(enabled) {
+        this.wakeLockEnabled = enabled;
+        if (enabled && this.isRecording && !this.isWakeLockActive()) {
+          this.requestWakeLock();
+        } else if (!enabled && this.isWakeLockActive()) {
+          this.releaseWakeLock();
+        }
+      }
+      /**
+       * 通知Wake Lock状态变化
+       */
+      notifyWakeLockChange(isActive, error) {
+        if (this.onWakeLockChange) {
+          this.onWakeLockChange(isActive, error);
+        }
+      }
+      /**
+       * 静态方法：检查设备对Wake Lock的支持状态
+       */
+      static checkWakeLockSupport() {
+        const isSupported = "wakeLock" in navigator && "request" in (navigator.wakeLock || {});
+        const userAgent = navigator.userAgent;
+        const isSafari = /Safari/.test(userAgent) && !/Chrome/.test(userAgent);
+        const isIOS = AudioRecorder.detectIOSStatic();
+        const isHTTPS = location.protocol === "https:";
+        let message = "";
+        if (!isSupported) {
+          if (isIOS && !isSafari) {
+            message = "iOS\u8BBE\u5907\u5EFA\u8BAE\u4F7F\u7528Safari\u6D4F\u89C8\u5668\u4EE5\u83B7\u5F97\u6700\u4F73\u5F55\u97F3\u4F53\u9A8C";
+          } else if (isIOS && !isHTTPS) {
+            message = "\u9700\u8981HTTPS\u73AF\u5883\u624D\u80FD\u4F7F\u7528\u9632\u9501\u5C4F\u529F\u80FD";
+          } else if (isIOS) {
+            message = "\u5F53\u524DiOS\u7248\u672C\u53EF\u80FD\u4E0D\u652F\u6301Wake Lock\uFF0C\u5EFA\u8BAE\u66F4\u65B0\u5230\u6700\u65B0\u7248\u672C";
+          } else {
+            message = "\u5F53\u524D\u6D4F\u89C8\u5668\u4E0D\u652F\u6301Wake Lock API";
+          }
+        } else {
+          message = "Wake Lock API\u652F\u6301\u6B63\u5E38\uFF0C\u53EF\u4EE5\u9632\u6B62\u5F55\u97F3\u65F6\u9501\u5C4F";
+        }
+        return {
+          isSupported,
+          userAgent,
+          isSafari,
+          isIOS,
+          isHTTPS,
+          message
+        };
+      }
+      /**
+       * 初始化页面可见性监听（应在构造函数中调用）
+       */
+      initVisibilityListener() {
+        document.addEventListener("visibilitychange", this.handleVisibilityChange);
+      }
+      /**
+       * 清理页面可见性监听
+       */
+      cleanupVisibilityListener() {
+        document.removeEventListener("visibilitychange", this.handleVisibilityChange);
+      }
+    };
+  }
+});
+
 // main.ts
 var main_exports = {};
 __export(main_exports, {
@@ -28,154 +505,7 @@ __export(main_exports, {
 });
 module.exports = __toCommonJS(main_exports);
 var import_obsidian4 = require("obsidian");
-
-// src/recorder.ts
-var AudioRecorder = class {
-  constructor(onDataAvailable, onError) {
-    this.onDataAvailable = onDataAvailable;
-    this.onError = onError;
-    this.mediaRecorder = null;
-    this.audioChunks = [];
-    this.stream = null;
-    this.isRecording = false;
-    this.isPaused = false;
-    this.startTime = 0;
-    this.pausedDuration = 0;
-    this.pauseStartTime = 0;
-  }
-  async startRecording() {
-    if (this.isRecording) {
-      throw new Error("\u5DF2\u5728\u5F55\u97F3\u4E2D");
-    }
-    try {
-      this.stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          sampleRate: 44100
-        }
-      });
-      this.mediaRecorder = new MediaRecorder(this.stream, {
-        mimeType: this.getSupportedMimeType()
-      });
-      this.audioChunks = [];
-      this.mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          this.audioChunks.push(event.data);
-        }
-      };
-      this.mediaRecorder.onstop = () => {
-        const audioBlob = new Blob(this.audioChunks, {
-          type: this.getSupportedMimeType()
-        });
-        this.onDataAvailable(audioBlob);
-        this.cleanup();
-      };
-      this.mediaRecorder.onerror = (event) => {
-        this.onError(new Error(`\u5F55\u97F3\u9519\u8BEF: ${event.error}`));
-        this.cleanup();
-      };
-      this.mediaRecorder.start(1e3);
-      this.isRecording = true;
-      this.isPaused = false;
-      this.startTime = Date.now();
-      this.pausedDuration = 0;
-    } catch (error) {
-      this.onError(new Error(`\u65E0\u6CD5\u542F\u52A8\u5F55\u97F3: ${error.message}`));
-      this.cleanup();
-      throw error;
-    }
-  }
-  stopRecording() {
-    if (this.mediaRecorder && this.isRecording) {
-      this.mediaRecorder.stop();
-      this.isRecording = false;
-      this.isPaused = false;
-    }
-  }
-  pauseRecording() {
-    if (this.mediaRecorder && this.isRecording && !this.isPaused) {
-      this.mediaRecorder.pause();
-      this.isPaused = true;
-      this.pauseStartTime = Date.now();
-    }
-  }
-  resumeRecording() {
-    if (this.mediaRecorder && this.isRecording && this.isPaused) {
-      this.mediaRecorder.resume();
-      this.isPaused = false;
-      this.pausedDuration += Date.now() - this.pauseStartTime;
-    }
-  }
-  getRecordingState() {
-    return this.isRecording;
-  }
-  getPausedState() {
-    return this.isPaused;
-  }
-  cleanup() {
-    if (this.stream) {
-      this.stream.getTracks().forEach((track) => track.stop());
-      this.stream = null;
-    }
-    this.mediaRecorder = null;
-    this.isRecording = false;
-    this.isPaused = false;
-    this.audioChunks = [];
-    this.startTime = 0;
-    this.pausedDuration = 0;
-    this.pauseStartTime = 0;
-  }
-  getSupportedMimeType() {
-    const types = [
-      "audio/webm;codecs=opus",
-      "audio/webm",
-      "audio/ogg;codecs=opus",
-      "audio/ogg",
-      "audio/wav",
-      "audio/mp4",
-      "audio/mpeg"
-    ];
-    for (const type of types) {
-      if (MediaRecorder.isTypeSupported(type)) {
-        return type;
-      }
-    }
-    return "audio/webm";
-  }
-  // 获取录音时长（毫秒）
-  getRecordingDuration() {
-    if (!this.isRecording) {
-      return 0;
-    }
-    const currentTime = Date.now();
-    let totalDuration = currentTime - this.startTime - this.pausedDuration;
-    if (this.isPaused) {
-      totalDuration -= currentTime - this.pauseStartTime;
-    }
-    return Math.max(0, totalDuration);
-  }
-  // 检查浏览器是否支持录音
-  static isSupported() {
-    return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
-  }
-  // 检查麦克风权限
-  static async checkMicrophonePermission() {
-    try {
-      const result = await navigator.permissions.query({ name: "microphone" });
-      return result.state === "granted";
-    } catch (error) {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        stream.getTracks().forEach((track) => track.stop());
-        return true;
-      } catch (e) {
-        return false;
-      }
-    }
-  }
-};
+init_recorder();
 
 // src/api-client.ts
 var import_obsidian = require("obsidian");
@@ -517,7 +847,7 @@ var DashScopeClient = class {
       throw new Error(`\u6587\u672C\u5904\u7406\u5931\u8D25: ${error.message}`);
     }
   }
-  // 文本整理和优化
+  // 文本整理和优化 - 强调这是用户的想法和思考
   async improveText(text, model) {
     var _a, _b;
     const request = {
@@ -525,11 +855,11 @@ var DashScopeClient = class {
       messages: [
         {
           role: "system",
-          content: "\u4F60\u662F\u4E00\u4E2A\u4E13\u4E1A\u7684\u6587\u672C\u7F16\u8F91\u52A9\u624B\u3002\u8BF7\u5BF9\u7528\u6237\u63D0\u4F9B\u7684\u8BED\u97F3\u8F6C\u5F55\u6587\u672C\u8FDB\u884C\u6574\u7406\u548C\u4F18\u5316\uFF0C\u8981\u6C42\uFF1A1. \u4FEE\u6B63\u8BED\u6CD5\u9519\u8BEF\u548C\u53E3\u8BED\u5316\u8868\u8FBE 2. \u4FDD\u6301\u539F\u59CB\u5185\u5BB9\u7684\u5B8C\u6574\u6027\u548C\u539F\u610F 3. \u4F18\u5316\u8868\u8FBE\u65B9\u5F0F\uFF0C\u4F7F\u5176\u66F4\u52A0\u6E05\u6670\u6613\u8BFB 4. \u4FDD\u6301\u903B\u8F91\u7ED3\u6784\u548C\u91CD\u8981\u4FE1\u606F\u4E0D\u53D8 5. \u4F7F\u7528\u89C4\u8303\u7684\u6807\u70B9\u7B26\u53F7 6. \u8F93\u51FA\u683C\u5F0F\u4E3A\u89C4\u6574\u7684\u4E2D\u6587\u6587\u672C"
+          content: "\u4F60\u662F\u4E00\u4E2A\u4E13\u4E1A\u7684\u601D\u60F3\u6574\u7406\u52A9\u624B\u3002\u7528\u6237\u901A\u8FC7\u8BED\u97F3\u8868\u8FBE\u4E86\u4ED6\u4EEC\u7684\u60F3\u6CD5\u3001\u611F\u53D7\u548C\u601D\u8003\uFF0C\u8BF7\u5E2E\u52A9\u6574\u7406\u8FD9\u4E9B\u5185\u5BB9\u3002\u8981\u6C42\uFF1A1. \u8FD9\u662F\u7528\u6237\u7684\u4E2A\u4EBA\u60F3\u6CD5\uFF0C\u8BF7\u4FDD\u6301\u7B2C\u4E00\u4EBA\u79F0\u7684\u8868\u8FBE\u65B9\u5F0F 2. \u4FEE\u6B63\u8BED\u97F3\u8F6C\u5F55\u4E2D\u7684\u8BED\u6CD5\u9519\u8BEF\u548C\u53E3\u8BED\u5316\u8868\u8FBE 3. \u4FDD\u6301\u7528\u6237\u7684\u539F\u59CB\u89C2\u70B9\u3001\u60C5\u611F\u548C\u610F\u56FE\u5B8C\u5168\u4E0D\u53D8 4. \u4F18\u5316\u8868\u8FBE\u903B\u8F91\uFF0C\u4F7F\u60F3\u6CD5\u66F4\u6E05\u6670\u6613\u61C2 5. \u4FDD\u6301\u7528\u6237\u7684\u8BED\u6C14\u548C\u4E2A\u4EBA\u98CE\u683C 6. \u4F7F\u7528\u81EA\u7136\u6D41\u7545\u7684\u4E2D\u6587\u8868\u8FBE"
         },
         {
           role: "user",
-          content: `\u8BF7\u5BF9\u4EE5\u4E0B\u8BED\u97F3\u8F6C\u5F55\u6587\u672C\u8FDB\u884C\u6574\u7406\u548C\u4F18\u5316\uFF1A
+          content: `\u8BF7\u6574\u7406\u6211\u7684\u4EE5\u4E0B\u60F3\u6CD5\u548C\u601D\u8003\uFF1A
 
 ${text}`
         }
@@ -538,7 +868,7 @@ ${text}`
     const response = await this.callCompatibleAPI(request);
     return ((_b = (_a = response.choices[0]) == null ? void 0 : _a.message) == null ? void 0 : _b.content) || text;
   }
-  // 生成相关标签
+  // 生成具体标签 - 基于用户内容的关键词分析
   async generateTags(text, model) {
     var _a, _b;
     const request = {
@@ -546,11 +876,11 @@ ${text}`
       messages: [
         {
           role: "system",
-          content: "\u4F60\u662F\u4E00\u4E2A\u4E13\u4E1A\u7684\u5185\u5BB9\u5206\u6790\u52A9\u624B\u3002\u8BF7\u5206\u6790\u7528\u6237\u63D0\u4F9B\u7684\u6587\u672C\u5185\u5BB9\uFF0C\u751F\u62103-5\u4E2A\u76F8\u5173\u7684\u6807\u7B7E\u3002\u8981\u6C42\uFF1A1. \u6807\u7B7E\u5E94\u8BE5\u51C6\u786E\u53CD\u6620\u6587\u672C\u7684\u4E3B\u8981\u5185\u5BB9\u548C\u4E3B\u9898 2. \u4F7F\u7528\u7B80\u6D01\u7684\u4E2D\u6587\u8BCD\u6C47 3. \u907F\u514D\u8FC7\u4E8E\u5BBD\u6CDB\u6216\u8FC7\u4E8E\u5177\u4F53\u7684\u6807\u7B7E 4. \u6807\u7B7E\u4E4B\u95F4\u7528\u9017\u53F7\u5206\u9694 5. \u4E0D\u9700\u8981\u6DFB\u52A0#\u7B26\u53F7\uFF0C\u53EA\u8F93\u51FA\u6807\u7B7E\u6587\u5B57"
+          content: '\u4F60\u662F\u4E00\u4E2A\u4E13\u4E1A\u7684\u5185\u5BB9\u6807\u7B7E\u751F\u6210\u52A9\u624B\u3002\u8BF7\u6839\u636E\u7528\u6237\u7684\u5185\u5BB9\u63D0\u53D63-5\u4E2A\u5177\u4F53\u7684\u6807\u7B7E\u5173\u952E\u8BCD\u3002\u8981\u6C42\uFF1A1. \u76F4\u63A5\u63D0\u53D6\u5185\u5BB9\u4E2D\u7684\u6838\u5FC3\u6982\u5FF5\u3001\u4E3B\u9898\u6216\u5173\u952E\u8BCD 2. \u4F7F\u7528\u7B80\u6D01\u7684\u540D\u8BCD\u6216\u77ED\u8BED\uFF082-4\u4E2A\u5B57\uFF09 3. \u907F\u514D\u4F7F\u7528"\u76F8\u5173\u4E3B\u9898"\u3001"\u5185\u5BB9\u5206\u6790"\u7B49\u901A\u7528\u8BCD\u6C47 4. \u5173\u6CE8\u5177\u4F53\u7684\u4E8B\u7269\u3001\u6982\u5FF5\u3001\u884C\u52A8\u6216\u9886\u57DF 5. \u7528\u9017\u53F7\u5206\u9694\uFF0C\u53EA\u8FD4\u56DE\u6807\u7B7E\u8BCD\u6C47\uFF0C\u4E0D\u8981\u5176\u4ED6\u89E3\u91CA\u6587\u5B57'
         },
         {
           role: "user",
-          content: `\u8BF7\u4E3A\u4EE5\u4E0B\u6587\u672C\u751F\u6210\u76F8\u5173\u6807\u7B7E\uFF1A
+          content: `\u8BF7\u4ECE\u4EE5\u4E0B\u5185\u5BB9\u4E2D\u63D0\u53D6\u5177\u4F53\u7684\u6807\u7B7E\u5173\u952E\u8BCD\uFF1A
 
 ${text}`
         }
@@ -558,7 +888,32 @@ ${text}`
     };
     const response = await this.callCompatibleAPI(request);
     const tagsText = ((_b = (_a = response.choices[0]) == null ? void 0 : _a.message) == null ? void 0 : _b.content) || "";
-    return tagsText.split(/[,，、]/).map((tag) => tag.trim()).filter((tag) => tag.length > 0).slice(0, 5);
+    console.log("AI\u751F\u6210\u7684\u6807\u7B7E\u539F\u59CB\u6587\u672C:", tagsText);
+    const tags = tagsText.split(/[,，、]/).map((tag) => tag.trim()).map((tag) => tag.replace(/^["'"`'"]/g, "").replace(/["'"`'"]$/g, "")).filter((tag) => tag.length > 0).filter((tag) => !this.isInvalidTag(tag)).slice(0, 5);
+    console.log("\u6E05\u7406\u540E\u7684\u6807\u7B7E:", tags);
+    return tags;
+  }
+  /**
+   * 检查是否为无效标签
+   */
+  isInvalidTag(tag) {
+    const invalidPatterns = [
+      /^相关主题$/,
+      /^内容分析$/,
+      /^主题标签$/,
+      /^标签$/,
+      /^主题$/,
+      /^分析$/,
+      /^内容$/,
+      /^关键词$/,
+      /^以下是?.*标签/,
+      /^根据.*内容/,
+      /^\d+[\.\、]/,
+      // 数字开头的列表项
+      /^[\-\*\+]\s/
+      // 列表符号
+    ];
+    return invalidPatterns.some((pattern) => pattern.test(tag)) || tag.length < 2 || tag.length > 10;
   }
   // 调用兼容模式API
   async callCompatibleAPI(request) {
@@ -691,7 +1046,7 @@ var NoteGenerator = class {
     this.app = app;
   }
   /**
-   * 生成增强的笔记内容（支持YAML front matter和结构化内容）
+   * 生成卡片式笔记内容 - 重新设计的简洁布局
    */
   generateEnhancedNoteContent(enhancedResult, metadata) {
     let content = "";
@@ -700,109 +1055,174 @@ var NoteGenerator = class {
     content += `# ${smartTitle}
 
 `;
+    content += `## \u6211\u7684\u60F3\u6CD5
+
+`;
+    content += enhancedResult.originalText + "\n\n";
+    if (enhancedResult.isProcessed) {
+      content += `## AI\u5206\u6790\u603B\u7ED3
+
+`;
+      if (enhancedResult.processedText && enhancedResult.processedText !== enhancedResult.originalText) {
+        content += enhancedResult.processedText + "\n\n";
+      }
+      if (enhancedResult.summary && enhancedResult.summary !== enhancedResult.processedText && enhancedResult.summary !== enhancedResult.originalText) {
+        content += `**\u6838\u5FC3\u8981\u70B9\uFF1A**
+${enhancedResult.summary}
+
+`;
+      }
+      if (enhancedResult.tags && enhancedResult.tags.length > 0) {
+        const tagLinks = enhancedResult.tags.map((tag) => `#${this.normalizeTagName(tag)}`).join(" ");
+        content += `**\u6807\u7B7E\uFF1A** ${tagLinks}
+
+`;
+      }
+    }
     if (metadata.audioFilePath) {
-      content += `## \u{1F3A7} \u539F\u97F3\u9891
+      content += `## \u5F55\u97F3\u6587\u4EF6
 
 `;
       content += `![[${metadata.audioFilePath}]]
 
 `;
     }
-    content += `## \u{1F4DD} \u8F6C\u5F55\u6587\u5B57
-
-`;
-    content += enhancedResult.originalText + "\n\n";
-    content += `## \u{1F4CB} \u7B14\u8BB0\u6982\u8981
-
-`;
-    content += enhancedResult.summary + "\n\n";
     return content;
   }
   /**
-   * 生成YAML front matter
+   * 生成简化的YAML front matter - 只保留核心信息
    */
   generateYAMLFrontMatter(enhancedResult, metadata) {
     const yaml = [];
     yaml.push("---");
     yaml.push(`created: ${this.formatObsidianDate(metadata.timestamp)}`);
-    yaml.push(`title: "${this.escapeYamlValue(this.formatSmartTitle(enhancedResult.smartTitle, metadata.timestamp))}"`);
-    yaml.push(`note_type: "voice_note"`);
-    if (metadata.duration) {
-      yaml.push(`duration: "${this.escapeYamlValue(metadata.duration)}"`);
+    yaml.push("tags:");
+    if (enhancedResult.tags && enhancedResult.tags.length > 0) {
+      const validTags = enhancedResult.tags.map((tag) => this.normalizeTagName(tag)).filter((tag) => tag && tag.length > 0);
+      if (validTags.length > 0) {
+        validTags.forEach((tag) => {
+          yaml.push(`  - "${tag}"`);
+        });
+      } else {
+        yaml.push('  - "\u8BED\u97F3\u7B14\u8BB0"');
+      }
+    } else {
+      const allTags = this.combineStructuredTags(enhancedResult.structuredTags);
+      if (allTags.length > 0) {
+        allTags.forEach((tag) => {
+          yaml.push(`  - "${tag}"`);
+        });
+      } else {
+        yaml.push('  - "\u8BED\u97F3\u7B14\u8BB0"');
+      }
     }
-    const allTags = this.combineStructuredTags(enhancedResult.structuredTags);
-    if (allTags.length > 0) {
-      yaml.push("tags:");
-      allTags.forEach((tag) => {
-        yaml.push(`  - "${tag}"`);
-      });
-    }
-    yaml.push(`ai_processed: ${enhancedResult.isProcessed}`);
-    yaml.push(`speech_model: "${metadata.model}"`);
-    if (metadata.textModel && enhancedResult.isProcessed) {
-      yaml.push(`text_model: "${metadata.textModel}"`);
-    }
-    if (metadata.audioFileName) {
-      yaml.push(`audio_file: "${metadata.audioFilePath}"`);
-    }
-    if (enhancedResult.summary && enhancedResult.summary !== enhancedResult.originalText) {
-      yaml.push(`summary: "${this.escapeYamlValue(enhancedResult.summary)}"`);
-    }
+    yaml.push(`type: "voice_note"`);
     yaml.push("---");
     yaml.push("");
     return yaml.join("\n");
   }
   /**
-   * 生成多模态笔记内容（音频+图片+OCR）
+   * 生成卡片式多模态笔记内容 - 以用户想法为核心的布局
    */
-  generateMultimodalNoteContent(multimodalContent, options) {
+  generateMultimodalNoteContent(multimodalContent, options, multimodalResult) {
     let content = "";
-    content += this.generateMultimodalYAMLFrontMatter(multimodalContent, options);
-    const title = this.formatMultimodalTitle(multimodalContent);
+    const aiTags = multimodalResult == null ? void 0 : multimodalResult.tags;
+    content += this.generateMultimodalYAMLFrontMatter(multimodalContent, options, aiTags);
+    const title = this.formatMultimodalSmartTitle(multimodalContent);
     content += `# ${title}
 
 `;
-    if (options.includeAudioSection && multimodalContent.audio) {
-      content += this.generateAudioSection(multimodalContent.audio, options.audioOptions);
+    if (multimodalContent.audio && multimodalContent.audio.transcribedText) {
+      content += `## \u6211\u7684\u60F3\u6CD5
+
+`;
+      content += multimodalContent.audio.transcribedText + "\n\n";
     }
-    if (options.includeImageSection && multimodalContent.images && multimodalContent.images.items.length > 0) {
-      content += this.generateImageSection(multimodalContent.images, options.imageOptions);
+    if (multimodalResult && multimodalResult.isProcessed) {
+      content += `## AI\u5206\u6790\u603B\u7ED3
+
+`;
+      if (multimodalResult.processedText && multimodalResult.processedText !== multimodalResult.audioText) {
+        content += multimodalResult.processedText + "\n\n";
+      }
+      if (multimodalResult.summary && multimodalResult.summary !== multimodalResult.processedText && multimodalResult.summary !== multimodalResult.audioText) {
+        content += `**\u6838\u5FC3\u8981\u70B9\uFF1A**
+${multimodalResult.summary}
+
+`;
+      }
+      if (multimodalResult.tags && multimodalResult.tags.length > 0) {
+        const tagLinks = multimodalResult.tags.map((tag) => `#${this.normalizeTagName(tag)}`).join(" ");
+        content += `**\u6807\u7B7E\uFF1A** ${tagLinks}
+
+`;
+      }
     }
     if (options.includeOCRSection && multimodalContent.images && multimodalContent.images.totalOCRText) {
-      content += this.generateOCRSection(multimodalContent.images, options.imageOptions);
+      content += `## \u53C2\u8003\u5185\u5BB9
+
+`;
+      content += `> \u6765\u81EA\u56FE\u7247\u7684\u6587\u5B57\u5185\u5BB9\uFF0C\u4F5C\u4E3A\u60F3\u6CD5\u7684\u80CC\u666F\u53C2\u8003
+
+`;
+      content += multimodalContent.images.totalOCRText + "\n\n";
     }
-    if (options.includeSummarySection && multimodalContent.combinedText) {
-      content += this.generateSummarySection(multimodalContent.combinedText, options.summaryOptions);
-    }
-    if (options.includeMetadata) {
-      content += this.generateMetadataSection(multimodalContent.metadata);
+    const hasFiles = multimodalContent.audio && options.audioOptions.includeOriginalAudio || multimodalContent.images && options.imageOptions.includeOriginalImages;
+    if (hasFiles) {
+      content += `## \u76F8\u5173\u6587\u4EF6
+
+`;
+      if (options.includeAudioSection && multimodalContent.audio && options.audioOptions.includeOriginalAudio) {
+        if (multimodalContent.audio.audioFilePath) {
+          content += `**\u5F55\u97F3**: ![[${multimodalContent.audio.audioFilePath}]]
+
+`;
+        }
+      }
+      if (options.includeImageSection && multimodalContent.images && options.imageOptions.includeOriginalImages) {
+        if (multimodalContent.images.items.length > 0) {
+          content += `**\u56FE\u7247**: `;
+          const imageLinks = multimodalContent.images.items.map((image) => this.getImageDisplayPath(image)).filter((path) => path).map((path) => `![[${path}]]`).join(" ");
+          content += imageLinks + "\n\n";
+        }
+      }
     }
     return content;
   }
   /**
-   * 生成多模态YAML front matter
+   * 生成简化的多模态YAML front matter - 只保留核心信息
    */
-  generateMultimodalYAMLFrontMatter(content, options) {
+  generateMultimodalYAMLFrontMatter(content, options, aiTags) {
     const yaml = [];
     yaml.push("---");
     yaml.push(`created: ${this.formatObsidianDate(content.metadata.createdAt)}`);
-    yaml.push(`title: "${this.escapeYamlValue(content.metadata.hasAudio ? "\u591A\u6A21\u6001\u8BED\u97F3\u7B14\u8BB0" : "\u56FE\u7247\u7B14\u8BB0")}"`);
-    yaml.push(`note_type: "multimodal_note"`);
-    yaml.push(`has_audio: ${content.metadata.hasAudio}`);
-    yaml.push(`has_images: ${content.metadata.hasImages}`);
-    yaml.push(`audio_count: ${content.metadata.audioCount}`);
-    yaml.push(`image_count: ${content.metadata.imageCount}`);
-    if (content.metadata.models.speechModel) {
-      yaml.push(`speech_model: "${content.metadata.models.speechModel}"`);
+    yaml.push("tags:");
+    if (aiTags && aiTags.length > 0) {
+      const validTags = aiTags.map((tag) => this.normalizeTagName(tag)).filter((tag) => tag && tag.length > 0);
+      if (validTags.length > 0) {
+        validTags.forEach((tag) => {
+          yaml.push(`  - "${tag}"`);
+        });
+      } else {
+        this.addFallbackTags(yaml, content);
+      }
+    } else {
+      if (content.metadata.hasAudio && content.metadata.hasImages) {
+        yaml.push('  - "\u591A\u6A21\u6001\u7B14\u8BB0"');
+        yaml.push('  - "\u8BED\u97F3\u7B14\u8BB0"');
+        yaml.push('  - "\u56FE\u7247\u7B14\u8BB0"');
+      } else if (content.metadata.hasAudio) {
+        yaml.push('  - "\u8BED\u97F3\u7B14\u8BB0"');
+      } else if (content.metadata.hasImages) {
+        yaml.push('  - "\u56FE\u7247\u7B14\u8BB0"');
+      }
     }
-    if (content.metadata.models.ocrModel) {
-      yaml.push(`ocr_model: "${content.metadata.models.ocrModel}"`);
-    }
-    if (content.metadata.models.textModel) {
-      yaml.push(`text_model: "${content.metadata.models.textModel}"`);
-    }
-    if (content.metadata.totalProcessingTime) {
-      yaml.push(`processing_time: "${content.metadata.totalProcessingTime}"`);
+    if (content.metadata.hasAudio && content.metadata.hasImages) {
+      yaml.push(`type: "multimodal_note"`);
+    } else if (content.metadata.hasAudio) {
+      yaml.push(`type: "voice_note"`);
+    } else {
+      yaml.push(`type: "image_note"`);
     }
     yaml.push("---");
     yaml.push("");
@@ -812,7 +1232,7 @@ var NoteGenerator = class {
    * 生成音频部分
    */
   generateAudioSection(audioData, options) {
-    let content = `## \u{1F3A7} \u8BED\u97F3\u5F55\u97F3
+    let content = `## \u8BED\u97F3\u5F55\u97F3
 
 `;
     if (options.includeOriginalAudio && audioData.audioFilePath) {
@@ -821,14 +1241,14 @@ var NoteGenerator = class {
 `;
     }
     if (audioData.duration) {
-      content += `> \u{1F4CA} \u5F55\u97F3\u65F6\u957F: ${audioData.duration}`;
+      content += `> \u5F55\u97F3\u65F6\u957F: ${audioData.duration}`;
       if (audioData.processingTime) {
         content += ` | \u5904\u7406\u65F6\u957F: ${audioData.processingTime}`;
       }
       content += "\n\n";
     }
     if (options.showTranscription && audioData.transcribedText) {
-      content += `### \u{1F4DD} \u8BED\u97F3\u8F6C\u5F55
+      content += `### \u8BED\u97F3\u8F6C\u5F55
 
 `;
       content += audioData.transcribedText + "\n\n";
@@ -839,7 +1259,7 @@ var NoteGenerator = class {
    * 生成图片部分
    */
   generateImageSection(imageData, options) {
-    let content = `## \u{1F4F7} \u56FE\u7247\u5185\u5BB9
+    let content = `## \u56FE\u7247\u5185\u5BB9
 
 `;
     if (options.includeOriginalImages && imageData.items.length > 0) {
@@ -853,7 +1273,7 @@ var NoteGenerator = class {
 
 `;
         }
-        content += `> \u{1F4CA} \u6587\u4EF6\u5927\u5C0F: ${this.formatFileSize(image.fileSize)} | \u7C7B\u578B: ${image.fileType}
+        content += `> \u6587\u4EF6\u5927\u5C0F: ${this.formatFileSize(image.fileSize)} | \u7C7B\u578B: ${image.fileType}
 
 `;
       });
@@ -864,7 +1284,7 @@ var NoteGenerator = class {
    * 生成OCR部分
    */
   generateOCRSection(imageData, options) {
-    let content = `## \u{1F50D} \u6587\u5B57\u8BC6\u522B\u7ED3\u679C
+    let content = `## \u6587\u5B57\u8BC6\u522B\u7ED3\u679C
 
 `;
     if (options.showOCRText && imageData.ocrResults.size > 0) {
@@ -881,7 +1301,7 @@ var NoteGenerator = class {
         }
       });
       if (imageData.totalOCRText && imageData.totalOCRText.trim()) {
-        content += `### \u{1F4CB} \u6240\u6709\u56FE\u7247\u6587\u5B57\u6C47\u603B
+        content += `### \u6240\u6709\u56FE\u7247\u6587\u5B57\u6C47\u603B
 
 `;
         content += imageData.totalOCRText + "\n\n";
@@ -893,23 +1313,23 @@ var NoteGenerator = class {
    * 生成综合分析部分
    */
   generateSummarySection(combinedText, options) {
-    let content = `## \u{1F4CB} \u5185\u5BB9\u5206\u6790
+    let content = `## \u5185\u5BB9\u5206\u6790
 
 `;
     if (options.combineAudioAndOCR) {
-      content += `### \u{1F504} \u7EFC\u5408\u5904\u7406
+      content += `### \u7EFC\u5408\u5904\u7406
 
 `;
       content += "> \u4EE5\u4E0B\u5185\u5BB9\u57FA\u4E8E\u8BED\u97F3\u8F6C\u5F55\u548C\u56FE\u7247\u6587\u5B57\u8BC6\u522B\u7684\u7EFC\u5408\u5206\u6790\n\n";
     }
     if (options.generateSummary) {
-      content += `### \u{1F4DD} \u5185\u5BB9\u6458\u8981
+      content += `### \u5185\u5BB9\u6458\u8981
 
 `;
       content += combinedText + "\n\n";
     }
     if (options.generateTags) {
-      content += `### \u{1F3F7}\uFE0F \u76F8\u5173\u6807\u7B7E
+      content += `### \u76F8\u5173\u6807\u7B7E
 
 `;
       content += "#\u591A\u6A21\u6001\u7B14\u8BB0 #AI\u5904\u7406\n\n";
@@ -920,7 +1340,7 @@ var NoteGenerator = class {
    * 生成元数据部分
    */
   generateMetadataSection(metadata) {
-    let content = `## \u{1F4CA} \u5904\u7406\u4FE1\u606F
+    let content = `## \u5904\u7406\u4FE1\u606F
 
 `;
     const info = [];
@@ -972,6 +1392,38 @@ var NoteGenerator = class {
     return `${dateStr} ${timeStr} - ${typeLabel}\u7B14\u8BB0`;
   }
   /**
+   * 格式化多模态智能标题 - 尝试从内容提取有意义的标题
+   */
+  formatMultimodalSmartTitle(content) {
+    const dateStr = content.metadata.createdAt.toLocaleDateString("zh-CN", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).replace(/\//g, "-");
+    const timeStr = content.metadata.createdAt.toLocaleTimeString("zh-CN", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false
+    });
+    let smartTitle = "";
+    if (content.combinedText && content.combinedText.trim()) {
+      smartTitle = this.extractTitleFromContent(content.combinedText);
+    } else if (content.audio && content.audio.transcribedText) {
+      smartTitle = this.extractTitleFromContent(content.audio.transcribedText);
+    }
+    if (!smartTitle || smartTitle === "\u8BED\u97F3\u7B14\u8BB0") {
+      const typeLabels = [];
+      if (content.metadata.hasAudio)
+        typeLabels.push("\u8BED\u97F3");
+      if (content.metadata.hasImages)
+        typeLabels.push("\u56FE\u7247");
+      const typeLabel = typeLabels.length > 1 ? "\u591A\u6A21\u6001" : typeLabels[0] || "\u7B14\u8BB0";
+      smartTitle = `${typeLabel}\u7B14\u8BB0`;
+    }
+    smartTitle = this.cleanSmartTitle(smartTitle);
+    return `${dateStr} ${timeStr} - ${smartTitle}`;
+  }
+  /**
    * 获取图片显示路径
    */
   getImageDisplayPath(image) {
@@ -997,8 +1449,8 @@ var NoteGenerator = class {
     structuredTags.times.forEach((time) => {
       tags.push(`\u65F6\u95F4-${this.normalizeTagName(time)}`);
     });
-    structuredTags.locations.forEach((location) => {
-      tags.push(`\u5730\u70B9-${this.normalizeTagName(location)}`);
+    structuredTags.locations.forEach((location2) => {
+      tags.push(`\u5730\u70B9-${this.normalizeTagName(location2)}`);
     });
     tags.push("\u8BED\u97F3\u7B14\u8BB0");
     return tags;
@@ -1007,7 +1459,31 @@ var NoteGenerator = class {
    * 规范化标签名称，确保Obsidian兼容性
    */
   normalizeTagName(tagName) {
-    return tagName.trim().replace(/\s+/g, "-").replace(/[\/\\]/g, "-").replace(/[^\w\u4e00-\u9fa5-]/g, "").replace(/-+/g, "-").replace(/^-|-$/g, "");
+    if (!tagName || typeof tagName !== "string") {
+      return "";
+    }
+    let normalized = tagName.trim().replace(/^#/, "").replace(/\s+/g, "").replace(/[\/\\]/g, "-").replace(/[^\w\u4e00-\u9fa5\u3040-\u309f\u30a0-\u30ff-]/g, "").replace(/-+/g, "-").replace(/^-|-$/g, "");
+    if (!normalized || normalized.length < 1) {
+      return "";
+    }
+    if (normalized.length > 15) {
+      normalized = normalized.substring(0, 15);
+    }
+    return normalized;
+  }
+  /**
+   * 添加后备标签
+   */
+  addFallbackTags(yaml, content) {
+    if (content.metadata.hasAudio && content.metadata.hasImages) {
+      yaml.push('  - "\u591A\u6A21\u6001\u7B14\u8BB0"');
+      yaml.push('  - "\u8BED\u97F3\u7B14\u8BB0"');
+      yaml.push('  - "\u56FE\u7247\u7B14\u8BB0"');
+    } else if (content.metadata.hasAudio) {
+      yaml.push('  - "\u8BED\u97F3\u7B14\u8BB0"');
+    } else if (content.metadata.hasImages) {
+      yaml.push('  - "\u56FE\u7247\u7B14\u8BB0"');
+    }
   }
   /**
    * 转义YAML值，确保兼容性
@@ -1027,7 +1503,7 @@ var NoteGenerator = class {
     return `${year}-${month}-${day} ${hour}:${minute}`;
   }
   /**
-   * 格式化智能标题
+   * 格式化智能标题 - 时间戳 + LLM生成的内容标题
    */
   formatSmartTitle(smartTitle, timestamp) {
     const dateStr = timestamp.toLocaleDateString("zh-CN", {
@@ -1040,7 +1516,44 @@ var NoteGenerator = class {
       minute: "2-digit",
       hour12: false
     });
-    return `${dateStr} ${timeStr} - ${smartTitle}`;
+    const cleanTitle = this.cleanSmartTitle(smartTitle);
+    return `${dateStr} ${timeStr} - ${cleanTitle}`;
+  }
+  /**
+   * 清理和优化智能标题
+   */
+  cleanSmartTitle(title) {
+    if (!title || title.trim().length === 0) {
+      return "\u8BED\u97F3\u7B14\u8BB0";
+    }
+    let cleaned = title.trim();
+    const prefixesToRemove = [
+      "\u6807\u9898\uFF1A",
+      "\u9898\u76EE\uFF1A",
+      "\u4E3B\u9898\uFF1A",
+      "\u5185\u5BB9\uFF1A",
+      "\u5173\u4E8E\uFF1A",
+      "\u6807\u9898:",
+      "\u9898\u76EE:",
+      "\u4E3B\u9898:",
+      "\u5185\u5BB9:",
+      "\u5173\u4E8E:",
+      "Title:",
+      "Subject:",
+      "Topic:",
+      "About:"
+    ];
+    for (const prefix of prefixesToRemove) {
+      if (cleaned.startsWith(prefix)) {
+        cleaned = cleaned.substring(prefix.length).trim();
+        break;
+      }
+    }
+    cleaned = cleaned.replace(/^["'「『]|["'」』]$/g, "");
+    if (cleaned.length > 25) {
+      cleaned = cleaned.substring(0, 22) + "...";
+    }
+    return cleaned.length > 0 ? cleaned : "\u8BED\u97F3\u7B14\u8BB0";
   }
   /**
    * 生成笔记内容（新版本，支持AI处理结果）
@@ -1057,13 +1570,13 @@ var NoteGenerator = class {
       content += "#\u8BED\u97F3\u7B14\u8BB0\n\n";
     }
     if (metadata.audioFilePath) {
-      content += `## \u{1F3A7} \u539F\u97F3\u9891
+      content += `## \u539F\u97F3\u9891
 
 `;
       content += `![[${metadata.audioFilePath}]]
 
 `;
-      content += `> \u{1F4BE} \u97F3\u9891\u6587\u4EF6: ${metadata.audioFileName || "\u672A\u77E5"}
+      content += `> \u97F3\u9891\u6587\u4EF6: ${metadata.audioFileName || "\u672A\u77E5"}
 
 `;
     }
@@ -1079,7 +1592,7 @@ var NoteGenerator = class {
       content += "\n\n";
     }
     if (processedContent.isProcessed) {
-      content += "> \u2705 \u6B64\u5185\u5BB9\u5DF2\u901A\u8FC7AI\u4F18\u5316\u5904\u7406\n\n";
+      content += "> \u6B64\u5185\u5BB9\u5DF2\u901A\u8FC7AI\u4F18\u5316\u5904\u7406\n\n";
     }
     const textToUse = processedContent.isProcessed ? processedContent.processedText : processedContent.originalText;
     content += "## \u5185\u5BB9\n\n";
@@ -1888,25 +2401,26 @@ ${text}`;
     }
   }
   /**
-   * 多模态文本LLM处理
+   * 多模态文本LLM处理 - 以语音为主体，图片为参考理解背景
    */
   async processMultimodalTextWithLLM(audioText, ocrText, combinedText) {
-    const prompt = `\u8BF7\u5904\u7406\u4EE5\u4E0B\u591A\u6A21\u6001\u5185\u5BB9\uFF0C\u5305\u542B\u8BED\u97F3\u8F6C\u5F55\u6587\u5B57\u548C\u56FE\u7247OCR\u8BC6\u522B\u6587\u5B57\uFF1A
+    const prompt = `\u8BF7\u7406\u89E3\u5E76\u6574\u7406\u7528\u6237\u7684\u60F3\u6CD5\u548C\u611F\u53D7\uFF1A
 
-\u8BED\u97F3\u8F6C\u5F55\u5185\u5BB9\uFF1A
+\u3010\u7528\u6237\u7684\u8BED\u97F3\u60F3\u6CD5\u3011\uFF08\u8FD9\u662F\u7528\u6237\u7684\u4E3B\u8981\u601D\u8003\u548C\u8868\u8FBE\uFF09\uFF1A
 ${audioText}
 
-\u56FE\u7247OCR\u8BC6\u522B\u5185\u5BB9\uFF1A
+\u3010\u7528\u6237\u770B\u5230\u7684\u53C2\u8003\u5185\u5BB9\u3011\uFF08\u8FD9\u662F\u7528\u6237\u770B\u5230/\u8BFB\u5230\u7684\u80CC\u666F\u6750\u6599\uFF09\uFF1A
 ${ocrText}
 
-\u8BF7\u6309\u4EE5\u4E0B\u8981\u6C42\u5904\u7406\uFF1A
-1. \u6574\u5408\u8BED\u97F3\u548C\u56FE\u7247\u4FE1\u606F\uFF0C\u751F\u6210\u8FDE\u8D2F\u7684\u6587\u5B57\u5185\u5BB9
-2. \u4FEE\u6B63\u8BED\u97F3\u8F6C\u5F55\u4E2D\u7684\u8BED\u6CD5\u9519\u8BEF\u548C\u53E3\u8BED\u5316\u8868\u8FBE
-3. \u7ED3\u5408\u56FE\u7247\u6587\u5B57\u4FE1\u606F\uFF0C\u8865\u5145\u548C\u5B8C\u5584\u5185\u5BB9\u63CF\u8FF0
-4. \u751F\u6210\u76F8\u5173\u7684\u4E3B\u9898\u6807\u7B7E\uFF08\u7528\u9017\u53F7\u5206\u9694\uFF09
-5. \u4FDD\u6301\u539F\u610F\u4E0D\u53D8\uFF0C\u8BED\u8A00\u81EA\u7136\u6D41\u7545
+\u5904\u7406\u539F\u5219\uFF1A
+1. **\u8BED\u97F3\u5185\u5BB9\u662F\u6838\u5FC3**\uFF1A\u7528\u6237\u7684\u8BED\u97F3\u8868\u8FBE\u4E86\u4ED6\u4EEC\u7684\u60F3\u6CD5\u3001\u611F\u53D7\u3001\u89C2\u70B9\u548C\u601D\u8003
+2. **\u56FE\u7247\u5185\u5BB9\u662F\u53C2\u8003**\uFF1A\u7528\u6237\u770B\u5230\u7684\u6587\u5B57\u5E2E\u52A9\u7406\u89E3\u7528\u6237\u4EA7\u751F\u8FD9\u4E9B\u60F3\u6CD5\u7684\u80CC\u666F\u548C\u89E6\u53D1\u56E0\u7D20
+3. **\u7406\u89E3\u7528\u6237\u610F\u56FE**\uFF1A\u5206\u6790\u7528\u6237\u57FA\u4E8E\u6240\u89C1\u5185\u5BB9\u4EA7\u751F\u4E86\u4EC0\u4E48\u60F3\u6CD5\u3001\u611F\u53D7\u6216\u6D1E\u5BDF
+4. \u4FEE\u6B63\u8BED\u97F3\u8F6C\u5F55\u4E2D\u7684\u8BED\u6CD5\u9519\u8BEF\uFF0C\u4FDD\u6301\u7528\u6237\u7684\u539F\u59CB\u610F\u56FE\u548C\u8BED\u6C14
+5. \u5982\u679C\u56FE\u7247\u5185\u5BB9\u80FD\u5E2E\u52A9\u7406\u89E3\u8BED\u97F3\u5185\u5BB9\u7684\u80CC\u666F\uFF0C\u53EF\u4EE5\u9002\u5F53\u8865\u5145\u8BF4\u660E
+6. \u751F\u6210\u51C6\u786E\u53CD\u6620\u7528\u6237\u60F3\u6CD5\u4E3B\u9898\u7684\u6807\u7B7E
 
-\u76F4\u63A5\u8FD4\u56DE\u5904\u7406\u540E\u7684\u6587\u5B57\u5185\u5BB9\uFF0C\u7136\u540E\u6362\u884C\u8FD4\u56DE\u6807\u7B7E\uFF08\u683C\u5F0F\uFF1A\u6807\u7B7E\uFF1Atag1,tag2,tag3\uFF09`;
+\u8BF7\u6574\u7406\u7528\u6237\u7684\u601D\u8003\u5185\u5BB9\uFF0C\u7136\u540E\u6362\u884C\u8FD4\u56DE\u76F8\u5173\u6807\u7B7E\uFF08\u683C\u5F0F\uFF1A\u6807\u7B7E\uFF1Atag1,tag2,tag3\uFF09`;
     return await this.client.processTextWithLLM(prompt, this.settings.textModel);
   }
   /**
@@ -2067,8 +2581,10 @@ var DEFAULT_SETTINGS = {
   includeOCRInNote: true,
   showOriginalImages: true,
   combineAudioAndOCR: true,
-  maxImageSize: 10
+  maxImageSize: 10,
   // 10MB
+  // Wake Lock防锁屏默认设置
+  enableWakeLock: true
 };
 var GetNoteSettingTab = class extends import_obsidian2.PluginSettingTab {
   constructor(app, plugin) {
@@ -2195,6 +2711,47 @@ var GetNoteSettingTab = class extends import_obsidian2.PluginSettingTab {
       this.plugin.settings.keepOriginalAudio = value;
       await this.plugin.saveSettings();
     }));
+    const wakeLockSetting = new import_obsidian2.Setting(containerEl).setName("\u9632\u9501\u5C4F\u529F\u80FD").setDesc("\u5F55\u97F3\u65F6\u81EA\u52A8\u9632\u6B62\u8BBE\u5907\u9501\u5C4F\uFF0C\u786E\u4FDD\u5F55\u97F3\u4E0D\u88AB\u4E2D\u65AD\uFF08\u9002\u7528\u4E8E\u652F\u6301Wake Lock API\u7684\u73B0\u4EE3\u6D4F\u89C8\u5668\uFF09").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableWakeLock).onChange(async (value) => {
+      this.plugin.settings.enableWakeLock = value;
+      await this.plugin.saveSettings();
+    }));
+    this.addWakeLockStatus(wakeLockSetting.settingEl);
+  }
+  /**
+   * 添加Wake Lock支持状态显示
+   */
+  addWakeLockStatus(settingEl) {
+    Promise.resolve().then(() => (init_recorder(), recorder_exports)).then(({ AudioRecorder: AudioRecorder2 }) => {
+      const wakeLockSupport = AudioRecorder2.checkWakeLockSupport();
+      const statusDiv = settingEl.createDiv("wake-lock-status");
+      statusDiv.style.marginTop = "8px";
+      statusDiv.style.padding = "8px";
+      statusDiv.style.borderRadius = "4px";
+      statusDiv.style.fontSize = "0.85rem";
+      if (wakeLockSupport.isSupported) {
+        statusDiv.style.backgroundColor = "rgba(0, 200, 0, 0.1)";
+        statusDiv.style.color = "var(--color-green)";
+        statusDiv.style.border = "1px solid rgba(0, 200, 0, 0.3)";
+        statusDiv.textContent = `\u2705 ${wakeLockSupport.message}`;
+      } else {
+        statusDiv.style.backgroundColor = "rgba(255, 140, 0, 0.1)";
+        statusDiv.style.color = "var(--color-orange)";
+        statusDiv.style.border = "1px solid rgba(255, 140, 0, 0.3)";
+        statusDiv.textContent = `\u26A0\uFE0F ${wakeLockSupport.message}`;
+      }
+      const detailsDiv = statusDiv.createDiv();
+      detailsDiv.style.marginTop = "4px";
+      detailsDiv.style.fontSize = "0.75rem";
+      detailsDiv.style.opacity = "0.8";
+      const details = [
+        `\u6D4F\u89C8\u5668: ${wakeLockSupport.isSafari ? "Safari" : "\u5176\u4ED6"}`,
+        `\u8BBE\u5907: ${wakeLockSupport.isIOS ? "iOS" : "\u975EiOS"}`,
+        `\u534F\u8BAE: ${wakeLockSupport.isHTTPS ? "HTTPS" : "HTTP"}`
+      ];
+      detailsDiv.textContent = details.join(" | ");
+    }).catch((error) => {
+      console.error("\u52A0\u8F7DAudioRecorder\u6A21\u5757\u5931\u8D25:", error);
+    });
   }
   createOutputSettings(containerEl) {
     containerEl.createEl("h3", { text: "\u{1F4C1} \u8F93\u51FA\u8BBE\u7F6E" });
@@ -2394,6 +2951,7 @@ var GetNoteSettingTab = class extends import_obsidian2.PluginSettingTab {
 
 // src/recording-modal.ts
 var import_obsidian3 = require("obsidian");
+init_recorder();
 
 // src/image-manager.ts
 var ImageManager = class {
@@ -3014,7 +3572,7 @@ var ImageManager = class {
 
 // src/recording-modal.ts
 var RecordingModal = class extends import_obsidian3.Modal {
-  constructor(app, onRecordingComplete, onError, enableLLMProcessing = false, enableImageOCR = false, onCancel) {
+  constructor(app, onRecordingComplete, onError, enableLLMProcessing = false, enableImageOCR = false, onCancel, enableWakeLock = true) {
     super(app);
     this.audioRecorder = null;
     this.state = "idle";
@@ -3024,6 +3582,7 @@ var RecordingModal = class extends import_obsidian3.Modal {
     // Processing state
     this.enableLLMProcessing = false;
     this.enableImageOCR = false;
+    this.enableWakeLock = true;
     // 图片组件状态
     this.imageState = {
       images: [],
@@ -3045,6 +3604,7 @@ var RecordingModal = class extends import_obsidian3.Modal {
     this.enableLLMProcessing = enableLLMProcessing;
     this.enableImageOCR = enableImageOCR;
     this.onCancel = onCancel;
+    this.enableWakeLock = enableWakeLock;
     this.imageManager = new ImageManager();
   }
   onOpen() {
@@ -3052,7 +3612,7 @@ var RecordingModal = class extends import_obsidian3.Modal {
     contentEl.empty();
     contentEl.addClass("recording-modal");
     const container = contentEl.createDiv("simple-recording-container");
-    const title = container.createEl("h2", { text: "\u{1F399}\uFE0F \u8BED\u97F3\u5F55\u5236" });
+    const title = container.createEl("h2", { text: "\u8BED\u97F3\u5F55\u5236" });
     title.addClass("simple-recording-title");
     this.statusContainer = container.createDiv("simple-status");
     this.statusContainer.addClass("status-idle");
@@ -3061,25 +3621,32 @@ var RecordingModal = class extends import_obsidian3.Modal {
     this.statusText.addClass("status-text");
     this.timeDisplay = container.createEl("div", { text: "00:00" });
     this.timeDisplay.addClass("simple-time");
+    this.wakeLockIndicator = container.createDiv("wake-lock-indicator");
+    this.wakeLockIndicator.style.display = "none";
+    const wakeLockIcon = this.wakeLockIndicator.createDiv("wake-lock-icon");
+    wakeLockIcon.setText("\u{1F512}");
+    this.wakeLockText = this.wakeLockIndicator.createEl("span", { text: "\u9632\u9501\u5C4F\u5DF2\u6FC0\u6D3B" });
+    this.wakeLockText.addClass("wake-lock-text");
     const buttonGroup = container.createDiv("simple-buttons");
     const startButtonEl = buttonGroup.createEl("button");
     startButtonEl.addClass("start-btn");
-    this.startButton = new import_obsidian3.ButtonComponent(startButtonEl).setButtonText("\u{1F3A4} \u5F00\u59CB\u5F55\u97F3").onClick(() => this.handleStart());
+    this.startButton = new import_obsidian3.ButtonComponent(startButtonEl).setButtonText("\u5F00\u59CB\u5F55\u97F3").onClick(() => this.handleStart());
     const pauseButtonEl = buttonGroup.createEl("button");
     pauseButtonEl.addClass("pause-btn");
-    this.pauseButton = new import_obsidian3.ButtonComponent(pauseButtonEl).setButtonText("\u23F8\uFE0F \u6682\u505C").setDisabled(true).onClick(() => this.handlePause());
+    this.pauseButton = new import_obsidian3.ButtonComponent(pauseButtonEl).setButtonText("\u6682\u505C").setDisabled(true).onClick(() => this.handlePause());
     const stopButtonEl = buttonGroup.createEl("button");
     stopButtonEl.addClass("stop-btn");
-    this.stopButton = new import_obsidian3.ButtonComponent(stopButtonEl).setButtonText("\u23F9\uFE0F \u505C\u6B62").setDisabled(true).onClick(() => this.handleStop());
+    this.stopButton = new import_obsidian3.ButtonComponent(stopButtonEl).setButtonText("\u505C\u6B62").setDisabled(true).onClick(() => this.handleStop());
     const cancelButtonEl = buttonGroup.createEl("button");
     cancelButtonEl.addClass("cancel-btn");
-    this.cancelButton = new import_obsidian3.ButtonComponent(cancelButtonEl).setButtonText("\u274C \u53D6\u6D88").onClick(() => this.handleCancel());
+    this.cancelButton = new import_obsidian3.ButtonComponent(cancelButtonEl).setButtonText("\u53D6\u6D88").onClick(() => this.handleCancel());
     const hintText = this.enableLLMProcessing ? "\u70B9\u51FB\u5F00\u59CB\u5F55\u97F3\uFF0C\u5B8C\u6210\u540E\u5C06\u8FDB\u884CAI\u8F6C\u5F55\u548C\u6587\u672C\u4F18\u5316" : "\u70B9\u51FB\u5F00\u59CB\u5F55\u97F3\uFF0C\u5F55\u97F3\u5B8C\u6210\u540E\u5C06\u81EA\u52A8\u8F6C\u6362\u4E3A\u6587\u5B57\u7B14\u8BB0";
     this.hintText = container.createEl("div", { text: hintText });
     this.hintText.addClass("simple-hint");
     if (this.enableImageOCR) {
       this.createImageSection(container);
     }
+    this.optimizeForIOS();
     this.updateUI();
   }
   onClose() {
@@ -3271,22 +3838,43 @@ var RecordingModal = class extends import_obsidian3.Modal {
         this.setState("recording");
         new import_obsidian3.Notice("\u7EE7\u7EED\u5F55\u97F3...");
       } else {
+        const isIOS = this.detectIOS();
+        if (isIOS) {
+          const iosStatus = await AudioRecorder.checkIOSMicrophoneStatus();
+          if (!iosStatus.supported) {
+            throw new Error(`\u5F55\u97F3\u529F\u80FD\u4E0D\u53D7\u652F\u6301: ${iosStatus.error}`);
+          }
+          if (!iosStatus.hasPermission && iosStatus.error) {
+            throw new Error(`\u9EA6\u514B\u98CE\u6743\u9650\u95EE\u9898: ${iosStatus.error}`);
+          }
+        }
         this.setState("recording");
         const hasPermission = await AudioRecorder.checkMicrophonePermission();
         if (!hasPermission) {
-          throw new Error("\u9700\u8981\u9EA6\u514B\u98CE\u6743\u9650\u624D\u80FD\u5F55\u97F3");
+          throw new Error("\u9700\u8981\u9EA6\u514B\u98CE\u6743\u9650\u624D\u80FD\u5F55\u97F3\u3002\u8BF7\u5728\u6D4F\u89C8\u5668\u8BBE\u7F6E\u4E2D\u5141\u8BB8\u9EA6\u514B\u98CE\u8BBF\u95EE\u3002");
         }
         this.audioRecorder = new AudioRecorder(
           (audioBlob) => this.handleRecordingComplete(audioBlob),
-          (error) => this.handleRecordingError(error)
+          (error) => this.handleRecordingError(error),
+          {
+            enableWakeLock: this.enableWakeLock,
+            // 使用设置中的配置
+            onWakeLockChange: (isActive, error) => this.handleWakeLockChange(isActive, error)
+          }
         );
         await this.audioRecorder.startRecording();
         this.startTimer();
-        new import_obsidian3.Notice("\u5F00\u59CB\u5F55\u97F3...");
+        const message = isIOS ? "\u5F55\u97F3\u5DF2\u5F00\u59CB\uFF08iOS\u8BBE\u5907\u8BF7\u4FDD\u6301\u9875\u9762\u6D3B\u8DC3\uFF09" : "\u5F00\u59CB\u5F55\u97F3...";
+        new import_obsidian3.Notice(message);
       }
     } catch (error) {
       this.setState("idle");
-      this.onError(error);
+      const errorMsg = error instanceof Error ? error.message : "\u5F55\u97F3\u542F\u52A8\u5931\u8D25";
+      if (this.detectIOS() && errorMsg.includes("NotAllowedError")) {
+        this.onError(new Error("\u9EA6\u514B\u98CE\u6743\u9650\u88AB\u62D2\u7EDD\u3002\u8BF7\u5728Safari\u8BBE\u7F6E\u4E2D\u5141\u8BB8\u6B64\u7F51\u7AD9\u8BBF\u95EE\u9EA6\u514B\u98CE\uFF0C\u7136\u540E\u91CD\u65B0\u5C1D\u8BD5\u3002"));
+      } else {
+        this.onError(new Error(errorMsg));
+      }
     }
   }
   handlePause() {
@@ -3346,7 +3934,7 @@ var RecordingModal = class extends import_obsidian3.Modal {
         this.statusContainer.addClass("status-idle");
         this.statusText.textContent = "\u51C6\u5907\u5F55\u97F3";
         this.hintText.textContent = this.enableLLMProcessing ? "\u70B9\u51FB\u5F00\u59CB\u5F55\u97F3\uFF0C\u5B8C\u6210\u540E\u5C06\u8FDB\u884CAI\u8F6C\u5F55\u548C\u6587\u672C\u4F18\u5316" : "\u70B9\u51FB\u5F00\u59CB\u5F55\u97F3\uFF0C\u5F55\u97F3\u5B8C\u6210\u540E\u5C06\u81EA\u52A8\u8F6C\u6362\u4E3A\u6587\u5B57\u7B14\u8BB0";
-        this.startButton.setDisabled(false).setButtonText("\u{1F3A4} \u5F00\u59CB\u5F55\u97F3");
+        this.startButton.setDisabled(false).setButtonText("\u5F00\u59CB\u5F55\u97F3");
         this.pauseButton.setDisabled(true);
         this.stopButton.setDisabled(true);
         this.cancelButton.setDisabled(true);
@@ -3366,60 +3954,60 @@ var RecordingModal = class extends import_obsidian3.Modal {
         this.statusText.textContent = "\u5F55\u97F3\u5DF2\u6682\u505C";
         this.timeDisplay.removeClass("recording");
         this.hintText.textContent = "\u5F55\u97F3\u5DF2\u6682\u505C\uFF0C\u53EF\u4EE5\u7EE7\u7EED\u5F55\u97F3\u6216\u505C\u6B62\u5F55\u97F3";
-        this.startButton.setDisabled(false).setButtonText("\u25B6\uFE0F \u7EE7\u7EED\u5F55\u97F3");
+        this.startButton.setDisabled(false).setButtonText("\u7EE7\u7EED\u5F55\u97F3");
         this.pauseButton.setDisabled(true);
         this.stopButton.setDisabled(false);
         this.cancelButton.setDisabled(false);
         break;
       case "saving-audio":
         this.statusContainer.addClass("status-recording");
-        this.statusText.textContent = "\u{1F4BE} \u4FDD\u5B58\u97F3\u9891...";
+        this.statusText.textContent = "\u4FDD\u5B58\u97F3\u9891...";
         this.timeDisplay.removeClass("recording");
         this.hintText.textContent = "\u6B63\u5728\u4FDD\u5B58\u97F3\u9891\u6587\u4EF6\uFF0C\u8BF7\u7A0D\u5019...";
         this.startButton.setDisabled(true);
         this.pauseButton.setDisabled(true);
         this.stopButton.setDisabled(true);
-        this.cancelButton.setDisabled(false).setButtonText("\u274C \u53D6\u6D88");
+        this.cancelButton.setDisabled(false).setButtonText("\u53D6\u6D88");
         break;
       case "transcribing":
         this.statusContainer.addClass("status-recording");
-        this.statusText.textContent = "\u{1F504} \u6B63\u5728\u8F6C\u5F55...";
+        this.statusText.textContent = "\u6B63\u5728\u8F6C\u5F55...";
         this.timeDisplay.removeClass("recording");
         this.hintText.textContent = "\u6B63\u5728\u5C06\u8BED\u97F3\u8F6C\u6362\u4E3A\u6587\u5B57\uFF0C\u8BF7\u7A0D\u5019...";
         this.startButton.setDisabled(true);
         this.pauseButton.setDisabled(true);
         this.stopButton.setDisabled(true);
-        this.cancelButton.setDisabled(false).setButtonText("\u274C \u53D6\u6D88");
+        this.cancelButton.setDisabled(false).setButtonText("\u53D6\u6D88");
         break;
       case "ocr-processing":
         this.statusContainer.addClass("status-recording");
-        this.statusText.textContent = "\u{1F50D} \u56FE\u7247\u8BC6\u522B\u4E2D...";
+        this.statusText.textContent = "\u56FE\u7247\u8BC6\u522B\u4E2D...";
         this.timeDisplay.removeClass("recording");
         this.hintText.textContent = "\u6B63\u5728\u8BC6\u522B\u56FE\u7247\u4E2D\u7684\u6587\u5B57\u5185\u5BB9\uFF0C\u8BF7\u7A0D\u5019...";
         this.startButton.setDisabled(true);
         this.pauseButton.setDisabled(true);
         this.stopButton.setDisabled(true);
-        this.cancelButton.setDisabled(false).setButtonText("\u274C \u53D6\u6D88");
+        this.cancelButton.setDisabled(false).setButtonText("\u53D6\u6D88");
         break;
       case "processing":
         this.statusContainer.addClass("status-recording");
-        this.statusText.textContent = "\u{1F916} AI\u5904\u7406\u4E2D...";
+        this.statusText.textContent = "AI\u5904\u7406\u4E2D...";
         this.timeDisplay.removeClass("recording");
         this.hintText.textContent = "\u6B63\u5728\u4F7F\u7528AI\u4F18\u5316\u6587\u672C\u5185\u5BB9\u548C\u751F\u6210\u6807\u7B7E\uFF0C\u8BF7\u7A0D\u5019...";
         this.startButton.setDisabled(true);
         this.pauseButton.setDisabled(true);
         this.stopButton.setDisabled(true);
-        this.cancelButton.setDisabled(false).setButtonText("\u274C \u53D6\u6D88");
+        this.cancelButton.setDisabled(false).setButtonText("\u53D6\u6D88");
         break;
       case "saving":
         this.statusContainer.addClass("status-recording");
-        this.statusText.textContent = "\u{1F4BE} \u4FDD\u5B58\u4E2D...";
+        this.statusText.textContent = "\u4FDD\u5B58\u4E2D...";
         this.timeDisplay.removeClass("recording");
         this.hintText.textContent = "\u6B63\u5728\u4FDD\u5B58\u7B14\u8BB0\u5230\u60A8\u7684\u5E93\u4E2D...";
         this.startButton.setDisabled(true);
         this.pauseButton.setDisabled(true);
         this.stopButton.setDisabled(true);
-        this.cancelButton.setDisabled(false).setButtonText("\u274C \u53D6\u6D88");
+        this.cancelButton.setDisabled(false).setButtonText("\u53D6\u6D88");
         break;
     }
   }
@@ -3446,7 +4034,7 @@ var RecordingModal = class extends import_obsidian3.Modal {
    */
   createImageSection(container) {
     this.imageSection = container.createDiv("image-section");
-    const imageTitle = this.imageSection.createEl("h3", { text: "\u{1F4F7} \u6DFB\u52A0\u56FE\u7247" });
+    const imageTitle = this.imageSection.createEl("h3", { text: "\u6DFB\u52A0\u56FE\u7247" });
     imageTitle.addClass("image-section-title");
     this.imageFileInput = this.imageManager.createFileInput();
     this.imageSection.appendChild(this.imageFileInput);
@@ -3461,7 +4049,7 @@ var RecordingModal = class extends import_obsidian3.Modal {
   createUploadArea() {
     this.imageUploadArea = this.imageSection.createDiv("image-upload-area");
     const uploadContent = this.imageUploadArea.createDiv("upload-content");
-    const uploadIcon = uploadContent.createEl("div", { text: "\u{1F4C1}" });
+    const uploadIcon = uploadContent.createEl("div", { text: "\u6587\u4EF6" });
     uploadIcon.addClass("upload-icon");
     const uploadText = uploadContent.createEl("div", { text: "\u70B9\u51FB\u6216\u62D6\u62FD\u56FE\u7247\u5230\u6B64\u5904" });
     uploadText.addClass("upload-text");
@@ -3644,7 +4232,7 @@ var RecordingModal = class extends import_obsidian3.Modal {
     const count = this.imageState.images.length;
     const title = this.imageSection.querySelector(".image-section-title");
     if (title) {
-      title.textContent = count > 0 ? `\u{1F4F7} \u6DFB\u52A0\u56FE\u7247 (${count})` : "\u{1F4F7} \u6DFB\u52A0\u56FE\u7247";
+      title.textContent = count > 0 ? `\u6DFB\u52A0\u56FE\u7247 (${count})` : "\u6DFB\u52A0\u56FE\u7247";
     }
   }
   /**
@@ -3671,6 +4259,85 @@ var RecordingModal = class extends import_obsidian3.Modal {
     this.imageManager.clearAllImages();
     this.imageState.images = [];
     this.updateImageGrid();
+  }
+  /**
+   * 检测是否为iOS设备
+   */
+  detectIOS() {
+    return AudioRecorder.detectIOSStatic();
+  }
+  /**
+   * iOS特定的UI优化
+   */
+  optimizeForIOS() {
+    if (!this.detectIOS())
+      return;
+    this.contentEl.addClass("ios-optimized");
+    const wakeLockSupport = AudioRecorder.checkWakeLockSupport();
+    let hintText = "iOS\u63D0\u793A\uFF1A\u9996\u6B21\u4F7F\u7528\u8BF7\u5728Safari\u8BBE\u7F6E\u4E2D\u5141\u8BB8\u9EA6\u514B\u98CE\u8BBF\u95EE";
+    if (wakeLockSupport.isSupported) {
+      hintText += "\uFF0C\u5F55\u97F3\u65F6\u5C06\u81EA\u52A8\u9632\u6B62\u9501\u5C4F";
+    } else {
+      hintText += "\uFF0C\u5F55\u97F3\u65F6\u8BF7\u4FDD\u6301\u5C4F\u5E55\u5F00\u542F";
+    }
+    const iosHint = this.contentEl.createEl("div", { text: hintText });
+    iosHint.addClass("ios-hint");
+    if (!wakeLockSupport.isSupported) {
+      const warningHint = this.contentEl.createEl("div", {
+        text: "\u26A0\uFE0F " + wakeLockSupport.message
+      });
+      warningHint.addClass("wake-lock-warning");
+    }
+  }
+  /**
+   * 处理Wake Lock状态变化
+   */
+  handleWakeLockChange(isActive, error) {
+    console.log(`Wake Lock\u72B6\u6001\u53D8\u5316: ${isActive ? "\u6FC0\u6D3B" : "\u91CA\u653E"}`, error ? `\u9519\u8BEF: ${error}` : "");
+    if (isActive) {
+      this.wakeLockIndicator.style.display = "flex";
+      this.wakeLockText.setText("\u9632\u9501\u5C4F\u5DF2\u6FC0\u6D3B");
+      this.wakeLockIndicator.removeClass("wake-lock-error");
+      this.wakeLockIndicator.addClass("wake-lock-active");
+    } else {
+      if (error) {
+        this.wakeLockIndicator.style.display = "flex";
+        this.wakeLockText.setText(`\u9632\u9501\u5C4F\u5931\u8D25: ${error}`);
+        this.wakeLockIndicator.removeClass("wake-lock-active");
+        this.wakeLockIndicator.addClass("wake-lock-error");
+        if (this.detectIOS()) {
+          this.showWakeLockFallbackHint();
+        }
+      } else {
+        this.wakeLockIndicator.style.display = "none";
+        this.wakeLockIndicator.removeClass("wake-lock-active", "wake-lock-error");
+      }
+    }
+  }
+  /**
+   * 显示Wake Lock失败后的备用提示
+   */
+  showWakeLockFallbackHint() {
+    const fallbackHint = "\u26A0\uFE0F \u9632\u9501\u5C4F\u529F\u80FD\u4E0D\u53EF\u7528\uFF0C\u5F55\u97F3\u65F6\u8BF7\u624B\u52A8\u4FDD\u6301\u5C4F\u5E55\u5F00\u542F";
+    if (this.state === "recording" || this.state === "paused") {
+      new import_obsidian3.Notice(fallbackHint);
+    }
+    if (this.hintText) {
+      const originalText = this.hintText.textContent || "";
+      if (!originalText.includes("\u8BF7\u624B\u52A8\u4FDD\u6301\u5C4F\u5E55\u5F00\u542F")) {
+        this.hintText.setText(originalText + " (\u5F55\u97F3\u65F6\u8BF7\u624B\u52A8\u4FDD\u6301\u5C4F\u5E55\u5F00\u542F)");
+      }
+    }
+  }
+  /**
+   * 获取Wake Lock状态信息（用于调试）
+   */
+  getWakeLockInfo() {
+    if (!this.audioRecorder) {
+      return "AudioRecorder\u672A\u521D\u59CB\u5316";
+    }
+    const state = this.audioRecorder.getWakeLockState();
+    return `Wake Lock - \u652F\u6301:${state.isSupported}, \u6FC0\u6D3B:${state.isActive}, \u542F\u7528:${state.isEnabled}`;
   }
 };
 
