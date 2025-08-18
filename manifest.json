@@ -1,5 +1,5 @@
 {
-	"id": "getnote-plugin",
+	"id": "getnote",
 	"name": "GetNote - AI语音笔记",
 	"version": "1.0.0",
 	"minAppVersion": "0.15.0",
