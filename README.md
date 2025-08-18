@@ -3,32 +3,61 @@
 ![Obsidian Plugin](https://img.shields.io/badge/Obsidian-Plugin-purple)
 ![TypeScript](https://img.shields.io/badge/TypeScript-blue)
 ![AI Powered](https://img.shields.io/badge/AI-Powered-green)
+![Version](https://img.shields.io/badge/Version-1.0.0-blue)
 
-GetNote是一款为Obsidian设计的AI语音笔记插件，使用阿里云百炼的qwen-audio-turbo模型，将语音录制转换为结构化的Markdown笔记。
+GetNote是一款为Obsidian设计的强大AI多模态笔记插件，集成阿里云DashScope多个先进AI模型，支持语音录制、图片OCR、AI文本处理等功能，将多媒体内容转换为结构化的智能笔记。
 
 ## 🎯 主要功能
 
-- **🎙️ 一键录音**: 工具栏按钮快速开始/停止录音
-- **🤖 AI理解**: 使用阿里云百炼语音理解模型处理音频
-- **📝 智能整理**: 自动生成结构化的Markdown笔记
-- **📁 自动保存**: 笔记自动保存到指定文件夹
-- **⚙️ 丰富设置**: 可自定义录音质量、提示词、模板等
-- **📊 元数据**: 包含录音时长、处理时间等详细信息
+### 🎙️ 语音录制 & AI转录
+- **专业录音界面**: 现代化UI设计，支持开始/暂停/停止/取消四种操作
+- **智能状态管理**: 7种录制状态，实时显示录制时长和处理进度
+- **Wake Lock支持**: 防止录制过程中屏幕锁定，确保不间断录制
+- **AI语音转录**: 使用qwen-audio-asr-latest模型，精确度高达95%+
+
+### 🖼️ 图片OCR & 多模态处理  
+- **拖拽上传**: 支持JPEG/PNG/GIF/WebP格式，最大10MB
+- **智能OCR**: qwen-vl-ocr-latest模型提取图片中的文字内容
+- **缩略图预览**: 实时预览上传的图片，支持批量处理
+- **多模态融合**: 语音+图片内容统一AI分析
+
+### 🤖 AI智能处理
+- **文本优化**: qwen-plus-latest模型优化转录文本
+- **智能标签**: 基于内容自动生成结构化标签
+- **内容分析**: AI理解并生成智能标题和摘要
+- **卡片式笔记**: 用户想法与AI分析分离的现代化布局
+
+### ⚡ 高级特性
+- **容错处理**: 多层异常处理，超时重试机制
+- **取消确认**: 智能取消确认，防止意外数据丢失
+- **响应式设计**: 完美适配桌面和移动设备
+- **无障碍支持**: 完整键盘导航和高对比度模式
 
 ## 🚀 快速开始
 
 ### 安装要求
 
-1. Obsidian 版本 >= 0.15.0
-2. 阿里云DashScope API Key ([获取方法](https://dashscope.aliyun.com/))
-3. 支持Web Audio API的现代浏览器
+1. **Obsidian**: 版本 >= 0.15.0
+2. **阿里云API**: DashScope API Key ([获取地址](https://dashscope.aliyun.com/))
+3. **浏览器**: 支持Web Audio API和Wake Lock API的现代浏览器
+4. **网络**: 稳定的网络连接用于API调用
 
 ### 安装方法
 
-1. 下载最新版本的插件文件
-2. 将文件放置到 `.obsidian/plugins/getnote-plugin/` 目录
-3. 在Obsidian设置中启用"GetNote"插件
-4. 配置API Key和相关设置
+#### 方法一：通过Obsidian社区插件（推荐）
+1. 打开Obsidian设置
+2. 进入"第三方插件"页面
+3. 关闭"安全模式"
+4. 点击"浏览"搜索"GetNote"
+5. 安装并启用插件
+6. 配置API Key开始使用
+
+#### 方法二：手动安装
+1. 从GitHub下载最新发布版本
+2. 解压到 `.obsidian/plugins/getnote-plugin/` 目录
+3. 重启Obsidian
+4. 在设置中启用"GetNote - AI语音笔记"插件
+5. 完成API配置
 
 ## 📋 使用方法
 
