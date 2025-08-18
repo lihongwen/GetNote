@@ -27,8 +27,8 @@ Thumbs.db
 .env.local
 .env.production
 
-# Plugin data (keep data.json for now as it might contain settings)
-# data.json
+# Plugin data - contains sensitive API keys
+data.json
 
 # OS X
 .AppleDouble
