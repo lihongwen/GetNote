@@ -398,7 +398,89 @@
     text-align: center;
 }
 
-/* 图片上传区域 */
+/* 整合的图片区域 */
+.integrated-image-area {
+    border: 2px dashed var(--background-modifier-border);
+    border-radius: 8px;
+    padding: 12px;
+    background: var(--background-secondary);
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    min-height: 80px;
+}
+
+.integrated-image-area.drag-active {
+    border-color: var(--interactive-accent);
+    background: var(--interactive-accent-hover);
+}
+
+/* 添加按钮区域 */
+.add-button-area {
+    flex-shrink: 0;
+}
+
+.image-add-button {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    border: 2px solid var(--interactive-accent);
+    background: var(--background-primary);
+    color: var(--interactive-accent);
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    line-height: 1;
+    transition: all 0.2s ease;
+    position: relative;
+}
+
+.image-add-button:hover {
+    background: var(--interactive-accent);
+    color: white;
+    transform: scale(1.05);
+}
+
+.image-add-button span {
+    font-size: 14px;
+    font-weight: bold;
+    margin-top: -2px;
+}
+
+/* 整合的图片网格 */
+.image-preview-area {
+    flex: 1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: flex-start;
+    max-height: 120px;
+    overflow-y: auto;
+}
+
+.image-preview-area:empty::after {
+    content: "暂无图片";
+    color: var(--text-muted);
+    font-size: 0.9em;
+    align-self: center;
+    text-align: center;
+    width: 100%;
+    line-height: 60px;
+}
+
+/* 提示文字样式 */
+.image-hint-text {
+    font-size: 0.8em;
+    color: var(--text-muted);
+    text-align: center;
+    margin-top: 8px;
+}
+
+/* 图片上传区域（保持向后兼容，用于拖拽） */
 .image-upload-area {
     border: 2px dashed var(--background-modifier-border);
     border-radius: 8px;
@@ -883,6 +965,39 @@
         min-width: 80px;
     }
     
+    /* 整合图片区域移动端优化 */
+    .integrated-image-area {
+        padding: 8px;
+        gap: 8px;
+        min-height: 70px;
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .add-button-area {
+        align-self: center;
+    }
+    
+    .image-add-button {
+        width: 50px;
+        height: 50px;
+        font-size: 16px;
+    }
+    
+    .image-add-button span {
+        font-size: 12px;
+    }
+    
+    .image-preview-area {
+        max-height: 100px;
+        justify-content: center;
+    }
+    
+    .image-hint-text {
+        font-size: 0.75em;
+        margin-top: 6px;
+    }
+
     /* 手机端删除按钮优化 */
     .delete-button.enhanced-delete {
         width: 28px;

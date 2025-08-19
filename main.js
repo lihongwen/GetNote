@@ -3992,7 +3992,7 @@ var RecordingModal = class extends import_obsidian3.Modal {
     this.setState(state);
   }
   /**
-   * 创建图片区域UI
+   * 创建图片区域UI - 整合版本
    */
   createImageSection(container) {
     this.imageSection = container.createDiv("image-section");
@@ -4000,35 +4000,30 @@ var RecordingModal = class extends import_obsidian3.Modal {
     imageTitle.addClass("image-section-title");
     this.imageFileInput = this.imageManager.createFileInput();
     this.imageSection.appendChild(this.imageFileInput);
-    this.createUploadArea();
-    this.createImageGrid();
+    this.createIntegratedImageArea();
     this.createProgressAreas();
     this.setupImageEvents();
   }
   /**
-   * 创建上传区域
+   * 创建整合的图片区域（添加按钮 + 预览区域）
    */
-  createUploadArea() {
-    this.imageUploadArea = this.imageSection.createDiv("image-upload-area");
-    const uploadContent = this.imageUploadArea.createDiv("upload-content");
-    const uploadIcon = uploadContent.createEl("div", { text: "\u6587\u4EF6" });
-    uploadIcon.addClass("upload-icon");
-    const uploadText = uploadContent.createEl("div", { text: "\u70B9\u51FB\u6216\u62D6\u62FD\u56FE\u7247\u5230\u6B64\u5904" });
-    uploadText.addClass("upload-text");
-    const uploadHint = uploadContent.createEl("div", { text: "\u652F\u6301 JPG\u3001PNG\u3001GIF\u3001WebP \u683C\u5F0F\uFF0C\u6700\u5927 10MB" });
-    uploadHint.addClass("upload-hint");
-    const uploadButton = uploadContent.createEl("button", { text: "\u9009\u62E9\u56FE\u7247" });
-    uploadButton.addClass("upload-button");
-    uploadButton.addEventListener("click", () => {
+  createIntegratedImageArea() {
+    const integratedArea = this.imageSection.createDiv("integrated-image-area");
+    const addButtonArea = integratedArea.createDiv("add-button-area");
+    const addButton = addButtonArea.createEl("button");
+    addButton.addClass("image-add-button");
+    addButton.innerHTML = "\u{1F4F7}<span>+</span>";
+    addButton.title = "\u6DFB\u52A0\u56FE\u7247";
+    addButton.addEventListener("click", () => {
       this.imageFileInput.click();
     });
-  }
-  /**
-   * 创建图片网格
-   */
-  createImageGrid() {
-    this.imageGrid = this.imageSection.createDiv("image-grid");
-    this.imageGrid.addClass("image-grid");
+    this.imageGrid = integratedArea.createDiv("image-preview-area");
+    this.imageGrid.addClass("image-grid", "integrated-grid");
+    const hintText = this.imageSection.createEl("div", {
+      text: "\u70B9\u51FB+\u6DFB\u52A0\u56FE\u7247\uFF0C\u652F\u6301JPG/PNG/GIF/WebP\uFF0C\u6700\u592710MB"
+    });
+    hintText.addClass("image-hint-text");
+    this.imageUploadArea = integratedArea;
   }
   /**
    * 创建进度显示区域

@@ -691,7 +691,7 @@ export class RecordingModal extends Modal {
     }
 
     /**
-     * 创建图片区域UI
+     * 创建图片区域UI - 整合版本
      */
     private createImageSection(container: HTMLElement): void {
         this.imageSection = container.createDiv('image-section');
@@ -704,11 +704,8 @@ export class RecordingModal extends Modal {
         this.imageFileInput = this.imageManager.createFileInput();
         this.imageSection.appendChild(this.imageFileInput);
         
-        // 上传区域
-        this.createUploadArea();
-        
-        // 图片网格
-        this.createImageGrid();
+        // 整合的图片区域（添加按钮 + 预览区域）
+        this.createIntegratedImageArea();
         
         // 进度显示区域
         this.createProgressAreas();
@@ -718,37 +715,34 @@ export class RecordingModal extends Modal {
     }
 
     /**
-     * 创建上传区域
+     * 创建整合的图片区域（添加按钮 + 预览区域）
      */
-    private createUploadArea(): void {
-        this.imageUploadArea = this.imageSection.createDiv('image-upload-area');
+    private createIntegratedImageArea(): void {
+        // 主容器
+        const integratedArea = this.imageSection.createDiv('integrated-image-area');
         
-        const uploadContent = this.imageUploadArea.createDiv('upload-content');
-        
-        // 上传图标和文字
-        const uploadIcon = uploadContent.createEl('div', { text: '文件' });
-        uploadIcon.addClass('upload-icon');
-        
-        const uploadText = uploadContent.createEl('div', { text: '点击或拖拽图片到此处' });
-        uploadText.addClass('upload-text');
-        
-        const uploadHint = uploadContent.createEl('div', { text: '支持 JPG、PNG、GIF、WebP 格式，最大 10MB' });
-        uploadHint.addClass('upload-hint');
-        
-        // 上传按钮
-        const uploadButton = uploadContent.createEl('button', { text: '选择图片' });
-        uploadButton.addClass('upload-button');
-        uploadButton.addEventListener('click', () => {
+        // 添加按钮区域
+        const addButtonArea = integratedArea.createDiv('add-button-area');
+        const addButton = addButtonArea.createEl('button');
+        addButton.addClass('image-add-button');
+        addButton.innerHTML = '📷<span>+</span>';
+        addButton.title = '添加图片';
+        addButton.addEventListener('click', () => {
             this.imageFileInput.click();
         });
-    }
-
-    /**
-     * 创建图片网格
-     */
-    private createImageGrid(): void {
-        this.imageGrid = this.imageSection.createDiv('image-grid');
-        this.imageGrid.addClass('image-grid');
+        
+        // 图片预览区域
+        this.imageGrid = integratedArea.createDiv('image-preview-area');
+        this.imageGrid.addClass('image-grid', 'integrated-grid');
+        
+        // 底部提示文字
+        const hintText = this.imageSection.createEl('div', { 
+            text: '点击+添加图片，支持JPG/PNG/GIF/WebP，最大10MB' 
+        });
+        hintText.addClass('image-hint-text');
+        
+        // 保持拖拽功能，将整个区域设为拖拽目标
+        this.imageUploadArea = integratedArea; // 复用原有的拖拽区域变量
     }
 
     /**
