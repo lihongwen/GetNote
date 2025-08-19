@@ -384,28 +384,17 @@ export class GetNoteSettingTab extends PluginSettingTab {
             const wakeLockSupport = AudioRecorder.checkWakeLockSupport();
             
             const statusDiv = settingEl.createDiv('wake-lock-status');
-            statusDiv.style.marginTop = '8px';
-            statusDiv.style.padding = '8px';
-            statusDiv.style.borderRadius = '4px';
-            statusDiv.style.fontSize = '0.85rem';
             
             if (wakeLockSupport.isSupported) {
-                statusDiv.style.backgroundColor = 'rgba(0, 200, 0, 0.1)';
-                statusDiv.style.color = 'var(--color-green)';
-                statusDiv.style.border = '1px solid rgba(0, 200, 0, 0.3)';
+                statusDiv.addClass('supported');
                 statusDiv.textContent = `✅ ${wakeLockSupport.message}`;
             } else {
-                statusDiv.style.backgroundColor = 'rgba(255, 140, 0, 0.1)';
-                statusDiv.style.color = 'var(--color-orange)';
-                statusDiv.style.border = '1px solid rgba(255, 140, 0, 0.3)';
+                statusDiv.addClass('unsupported');
                 statusDiv.textContent = `⚠️ ${wakeLockSupport.message}`;
             }
 
             // 添加详细信息
-            const detailsDiv = statusDiv.createDiv();
-            detailsDiv.style.marginTop = '4px';
-            detailsDiv.style.fontSize = '0.75rem';
-            detailsDiv.style.opacity = '0.8';
+            const detailsDiv = statusDiv.createDiv('wake-lock-details');
             
             const details = [
                 `浏览器: ${wakeLockSupport.isSafari ? 'Safari' : '其他'}`,
@@ -537,14 +526,12 @@ export class GetNoteSettingTab extends PluginSettingTab {
         buttonEl.disabled = true;
 
         try {
-            console.log('开始API连接测试，API Key:', this.plugin.settings.apiKey.substring(0, 10) + '...');
             
             const client = new DashScopeClient(this.plugin.settings.apiKey);
             const result = await client.testConnection();
             
             if (result.success) {
                 this.showTestResult('✅ API连接成功！', 'success');
-                console.log('API测试成功');
             } else {
                 const errorMsg = result.error || '未知错误';
                 this.showTestResult(`❌ API连接失败: ${errorMsg}`, 'error');
@@ -570,7 +557,6 @@ export class GetNoteSettingTab extends PluginSettingTab {
         buttonEl.disabled = true;
 
         try {
-            console.log('开始文本LLM测试，模型:', this.plugin.settings.textModel);
             
             const textProcessor = new TextProcessor(this.plugin.settings.apiKey, {
                 enableLLMProcessing: true,
@@ -584,7 +570,6 @@ export class GetNoteSettingTab extends PluginSettingTab {
             
             if (result.success) {
                 this.showTextLLMTestResult('✅ 文本AI连接成功！', 'success');
-                console.log('文本LLM测试成功');
             } else {
                 const errorMsg = result.error || '未知错误';
                 this.showTextLLMTestResult(`❌ 文本AI连接失败: ${errorMsg}`, 'error');
@@ -610,14 +595,12 @@ export class GetNoteSettingTab extends PluginSettingTab {
         buttonEl.disabled = true;
 
         try {
-            console.log('开始OCR功能测试，模型:', this.plugin.settings.ocrModel);
             
             const client = new DashScopeClient(this.plugin.settings.apiKey);
             const result = await client.testOCR();
             
             if (result.success) {
                 this.showOCRTestResult('✅ OCR功能测试成功！', 'success');
-                console.log('OCR测试成功');
             } else {
                 const errorMsg = result.error || '未知错误';
                 this.showOCRTestResult(`❌ OCR功能测试失败: ${errorMsg}`, 'error');
@@ -638,16 +621,8 @@ export class GetNoteSettingTab extends PluginSettingTab {
             this.apiTestResult.empty();
             const resultEl = this.apiTestResult.createDiv();
             resultEl.setText(message);
-            resultEl.addClass(`test-result-${type}`);
-            
-            // 添加简单的样式
-            if (type === 'success') {
-                resultEl.style.color = '#10b981';
-            } else {
-                resultEl.style.color = '#ef4444';
-            }
-            resultEl.style.marginTop = '8px';
-            resultEl.style.fontSize = '14px';
+            resultEl.addClass('test-result');
+            resultEl.addClass(type);
         }
     }
 
@@ -656,16 +631,8 @@ export class GetNoteSettingTab extends PluginSettingTab {
             this.textLLMTestResult.empty();
             const resultEl = this.textLLMTestResult.createDiv();
             resultEl.setText(message);
-            resultEl.addClass(`test-result-${type}`);
-            
-            // 添加简单的样式
-            if (type === 'success') {
-                resultEl.style.color = '#10b981';
-            } else {
-                resultEl.style.color = '#ef4444';
-            }
-            resultEl.style.marginTop = '8px';
-            resultEl.style.fontSize = '14px';
+            resultEl.addClass('test-result');
+            resultEl.addClass(type);
         }
     }
 
@@ -674,16 +641,8 @@ export class GetNoteSettingTab extends PluginSettingTab {
             this.ocrTestResult.empty();
             const resultEl = this.ocrTestResult.createDiv();
             resultEl.setText(message);
-            resultEl.addClass(`test-result-${type}`);
-            
-            // 添加简单的样式
-            if (type === 'success') {
-                resultEl.style.color = '#10b981';
-            } else {
-                resultEl.style.color = '#ef4444';
-            }
-            resultEl.style.marginTop = '8px';
-            resultEl.style.fontSize = '14px';
+            resultEl.addClass('test-result');
+            resultEl.addClass(type);
         }
     }
 

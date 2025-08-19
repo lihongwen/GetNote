@@ -194,12 +194,10 @@ var init_recorder = __esm({
         ];
         for (const type of types) {
           if (MediaRecorder.isTypeSupported(type)) {
-            console.log(`\u9009\u62E9\u97F3\u9891\u683C\u5F0F: ${type}`);
             return type;
           }
         }
         const defaultType = this.isIOS ? "audio/mp4" : "audio/webm";
-        console.log(`\u4F7F\u7528\u9ED8\u8BA4\u97F3\u9891\u683C\u5F0F: ${defaultType}`);
         return defaultType;
       }
       // 获取录音时长（毫秒）
@@ -2724,25 +2722,14 @@ var GetNoteSettingTab = class extends import_obsidian2.PluginSettingTab {
     Promise.resolve().then(() => (init_recorder(), recorder_exports)).then(({ AudioRecorder: AudioRecorder2 }) => {
       const wakeLockSupport = AudioRecorder2.checkWakeLockSupport();
       const statusDiv = settingEl.createDiv("wake-lock-status");
-      statusDiv.style.marginTop = "8px";
-      statusDiv.style.padding = "8px";
-      statusDiv.style.borderRadius = "4px";
-      statusDiv.style.fontSize = "0.85rem";
       if (wakeLockSupport.isSupported) {
-        statusDiv.style.backgroundColor = "rgba(0, 200, 0, 0.1)";
-        statusDiv.style.color = "var(--color-green)";
-        statusDiv.style.border = "1px solid rgba(0, 200, 0, 0.3)";
+        statusDiv.addClass("supported");
         statusDiv.textContent = `\u2705 ${wakeLockSupport.message}`;
       } else {
-        statusDiv.style.backgroundColor = "rgba(255, 140, 0, 0.1)";
-        statusDiv.style.color = "var(--color-orange)";
-        statusDiv.style.border = "1px solid rgba(255, 140, 0, 0.3)";
+        statusDiv.addClass("unsupported");
         statusDiv.textContent = `\u26A0\uFE0F ${wakeLockSupport.message}`;
       }
-      const detailsDiv = statusDiv.createDiv();
-      detailsDiv.style.marginTop = "4px";
-      detailsDiv.style.fontSize = "0.75rem";
-      detailsDiv.style.opacity = "0.8";
+      const detailsDiv = statusDiv.createDiv("wake-lock-details");
       const details = [
         `\u6D4F\u89C8\u5668: ${wakeLockSupport.isSafari ? "Safari" : "\u5176\u4ED6"}`,
         `\u8BBE\u5907: ${wakeLockSupport.isIOS ? "iOS" : "\u975EiOS"}`,
@@ -2809,12 +2796,10 @@ var GetNoteSettingTab = class extends import_obsidian2.PluginSettingTab {
     buttonEl.setText("\u6D4B\u8BD5\u4E2D...");
     buttonEl.disabled = true;
     try {
-      console.log("\u5F00\u59CBAPI\u8FDE\u63A5\u6D4B\u8BD5\uFF0CAPI Key:", this.plugin.settings.apiKey.substring(0, 10) + "...");
       const client = new DashScopeClient(this.plugin.settings.apiKey);
       const result = await client.testConnection();
       if (result.success) {
         this.showTestResult("\u2705 API\u8FDE\u63A5\u6210\u529F\uFF01", "success");
-        console.log("API\u6D4B\u8BD5\u6210\u529F");
       } else {
         const errorMsg = result.error || "\u672A\u77E5\u9519\u8BEF";
         this.showTestResult(`\u274C API\u8FDE\u63A5\u5931\u8D25: ${errorMsg}`, "error");
@@ -2837,7 +2822,6 @@ var GetNoteSettingTab = class extends import_obsidian2.PluginSettingTab {
     buttonEl.setText("\u6D4B\u8BD5\u4E2D...");
     buttonEl.disabled = true;
     try {
-      console.log("\u5F00\u59CB\u6587\u672CLLM\u6D4B\u8BD5\uFF0C\u6A21\u578B:", this.plugin.settings.textModel);
       const textProcessor = new TextProcessor(this.plugin.settings.apiKey, {
         enableLLMProcessing: true,
         textModel: this.plugin.settings.textModel,
@@ -2848,7 +2832,6 @@ var GetNoteSettingTab = class extends import_obsidian2.PluginSettingTab {
       const result = await textProcessor.testLLMConnection();
       if (result.success) {
         this.showTextLLMTestResult("\u2705 \u6587\u672CAI\u8FDE\u63A5\u6210\u529F\uFF01", "success");
-        console.log("\u6587\u672CLLM\u6D4B\u8BD5\u6210\u529F");
       } else {
         const errorMsg = result.error || "\u672A\u77E5\u9519\u8BEF";
         this.showTextLLMTestResult(`\u274C \u6587\u672CAI\u8FDE\u63A5\u5931\u8D25: ${errorMsg}`, "error");
@@ -2871,12 +2854,10 @@ var GetNoteSettingTab = class extends import_obsidian2.PluginSettingTab {
     buttonEl.setText("\u6D4B\u8BD5\u4E2D...");
     buttonEl.disabled = true;
     try {
-      console.log("\u5F00\u59CBOCR\u529F\u80FD\u6D4B\u8BD5\uFF0C\u6A21\u578B:", this.plugin.settings.ocrModel);
       const client = new DashScopeClient(this.plugin.settings.apiKey);
       const result = await client.testOCR();
       if (result.success) {
         this.showOCRTestResult("\u2705 OCR\u529F\u80FD\u6D4B\u8BD5\u6210\u529F\uFF01", "success");
-        console.log("OCR\u6D4B\u8BD5\u6210\u529F");
       } else {
         const errorMsg = result.error || "\u672A\u77E5\u9519\u8BEF";
         this.showOCRTestResult(`\u274C OCR\u529F\u80FD\u6D4B\u8BD5\u5931\u8D25: ${errorMsg}`, "error");
@@ -2896,14 +2877,8 @@ var GetNoteSettingTab = class extends import_obsidian2.PluginSettingTab {
       this.apiTestResult.empty();
       const resultEl = this.apiTestResult.createDiv();
       resultEl.setText(message);
-      resultEl.addClass(`test-result-${type}`);
-      if (type === "success") {
-        resultEl.style.color = "#10b981";
-      } else {
-        resultEl.style.color = "#ef4444";
-      }
-      resultEl.style.marginTop = "8px";
-      resultEl.style.fontSize = "14px";
+      resultEl.addClass("test-result");
+      resultEl.addClass(type);
     }
   }
   showTextLLMTestResult(message, type) {
@@ -2911,14 +2886,8 @@ var GetNoteSettingTab = class extends import_obsidian2.PluginSettingTab {
       this.textLLMTestResult.empty();
       const resultEl = this.textLLMTestResult.createDiv();
       resultEl.setText(message);
-      resultEl.addClass(`test-result-${type}`);
-      if (type === "success") {
-        resultEl.style.color = "#10b981";
-      } else {
-        resultEl.style.color = "#ef4444";
-      }
-      resultEl.style.marginTop = "8px";
-      resultEl.style.fontSize = "14px";
+      resultEl.addClass("test-result");
+      resultEl.addClass(type);
     }
   }
   showOCRTestResult(message, type) {
@@ -2926,14 +2895,8 @@ var GetNoteSettingTab = class extends import_obsidian2.PluginSettingTab {
       this.ocrTestResult.empty();
       const resultEl = this.ocrTestResult.createDiv();
       resultEl.setText(message);
-      resultEl.addClass(`test-result-${type}`);
-      if (type === "success") {
-        resultEl.style.color = "#10b981";
-      } else {
-        resultEl.style.color = "#ef4444";
-      }
-      resultEl.style.marginTop = "8px";
-      resultEl.style.fontSize = "14px";
+      resultEl.addClass("test-result");
+      resultEl.addClass(type);
     }
   }
   exportSettings() {
@@ -2991,7 +2954,6 @@ var ImageManager = class {
         if (result.status === "fulfilled" && result.value.success) {
           this.images.set(result.value.imageItem.id, result.value.imageItem);
           successful.push(result.value.imageItem);
-          console.log(`\u6DFB\u52A0\u56FE\u7247\u6210\u529F: ${file.name}, \u5927\u5C0F: ${this.formatFileSize(file.size)}`);
         } else {
           const error = result.status === "fulfilled" ? result.value.error : result.reason;
           failed.push(this.createProcessingError(file, "processing", error));
@@ -3031,7 +2993,6 @@ var ImageManager = class {
     const existed = this.images.has(imageId);
     this.images.delete(imageId);
     if (existed) {
-      console.log(`\u5220\u9664\u56FE\u7247: ${imageId}`);
     }
     return existed;
   }
@@ -3059,7 +3020,6 @@ var ImageManager = class {
    * 清空所有图片
    */
   clearAllImages() {
-    console.log(`\u6E05\u7A7A\u6240\u6709\u56FE\u7247, \u5171${this.images.size}\u5F20`);
     this.images.clear();
   }
   /**
@@ -3366,7 +3326,7 @@ var ImageManager = class {
     input.type = "file";
     input.accept = this.supportedFormats.join(",");
     input.multiple = true;
-    input.style.display = "none";
+    input.classList.add("hidden");
     return input;
   }
   /**
@@ -3530,7 +3490,6 @@ var ImageManager = class {
     errors.forEach((error) => {
       if (error.imageId && this.images.has(error.imageId)) {
         this.images.delete(error.imageId);
-        console.log(`\u6E05\u7406\u5931\u8D25\u7684\u56FE\u7247\u8BB0\u5F55: ${error.fileName}`);
       }
     });
   }
@@ -3550,7 +3509,6 @@ var ImageManager = class {
         successRate: 0
       };
     }
-    console.log(`\u91CD\u8BD5 ${retryFiles.length} \u5F20\u53EF\u6062\u590D\u7684\u56FE\u7247`);
     return await this.addImages(retryFiles);
   }
   /**
@@ -3622,7 +3580,7 @@ var RecordingModal = class extends import_obsidian3.Modal {
     this.timeDisplay = container.createEl("div", { text: "00:00" });
     this.timeDisplay.addClass("simple-time");
     this.wakeLockIndicator = container.createDiv("wake-lock-indicator");
-    this.wakeLockIndicator.style.display = "none";
+    this.wakeLockIndicator.addClass("hidden");
     const wakeLockIcon = this.wakeLockIndicator.createDiv("wake-lock-icon");
     wakeLockIcon.setText("\u{1F512}");
     this.wakeLockText = this.wakeLockIndicator.createEl("span", { text: "\u9632\u9501\u5C4F\u5DF2\u6FC0\u6D3B" });
@@ -3650,22 +3608,18 @@ var RecordingModal = class extends import_obsidian3.Modal {
     this.updateUI();
   }
   onClose() {
-    console.log(`[SAFE] Modal onClose \u88AB\u8C03\u7528\uFF0C\u72B6\u6001: ${this.state}, \u539F\u56E0: ${this.closeReason}, isDestroying: ${this.isDestroying}`);
     if (this.isDestroying) {
-      console.log("[SAFE] Modal\u5DF2\u5728\u9500\u6BC1\u8FC7\u7A0B\u4E2D\uFF0C\u8DF3\u8FC7onClose\u5904\u7406");
       return;
     }
     this.isDestroying = true;
     try {
       this.performCleanup();
       if (this.shouldConfirmClose() && this.closeReason !== "normal") {
-        console.log("[SAFE] \u9700\u8981\u7528\u6237\u786E\u8BA4\uFF0C\u663E\u793A\u786E\u8BA4\u5BF9\u8BDD\u6846");
         this.isDestroying = false;
         this.showCloseConfirmation();
         return;
       }
       this.notifyCancellation();
-      console.log("[SAFE] Modal onClose \u6E05\u7406\u5B8C\u6210");
     } catch (error) {
       console.error("[SAFE] Modal onClose \u6E05\u7406\u65F6\u51FA\u9519:", error);
     }
@@ -3693,10 +3647,8 @@ var RecordingModal = class extends import_obsidian3.Modal {
     setTimeout(() => {
       const confirmed = confirm(message);
       if (confirmed) {
-        console.log("[SAFE] \u7528\u6237\u786E\u8BA4\u5173\u95ED\uFF0C\u6267\u884C\u5B89\u5168\u5173\u95ED\u6D41\u7A0B");
         this.safeClose();
       } else {
-        console.log("[SAFE] \u7528\u6237\u53D6\u6D88\u5173\u95ED\u786E\u8BA4\uFF0C\u7EE7\u7EED\u5F53\u524D\u72B6\u6001");
         this.isDestroying = false;
         this.closeReason = "manual";
       }
@@ -3726,7 +3678,6 @@ var RecordingModal = class extends import_obsidian3.Modal {
    * 安全关闭Modal - 使用异步机制防止递归
    */
   safeClose() {
-    console.log(`[SAFE] safeClose \u88AB\u8C03\u7528\uFF0CcloseCallCount: ${this.closeCallCount}`);
     this.closeCallCount++;
     if (this.closeCallCount > 3) {
       console.error("[SAFE] \u68C0\u6D4B\u5230\u8FC7\u591A\u5173\u95ED\u8C03\u7528\uFF0C\u5F3A\u5236\u4E2D\u65AD");
@@ -3738,12 +3689,10 @@ var RecordingModal = class extends import_obsidian3.Modal {
     }
     this.destroyTimeout = window.setTimeout(() => {
       try {
-        console.log("[SAFE] \u5F02\u6B65\u6267\u884CModal\u5173\u95ED");
         this.isClosing = true;
         this.isDestroying = true;
         this.performFinalCleanup();
         this.containerEl.remove();
-        console.log("[SAFE] Modal\u5DF2\u5B89\u5168\u5173\u95ED");
       } catch (error) {
         console.error("[SAFE] \u5B89\u5168\u5173\u95ED\u8FC7\u7A0B\u4E2D\u51FA\u9519:", error);
         this.forceDestroy();
@@ -3754,7 +3703,6 @@ var RecordingModal = class extends import_obsidian3.Modal {
    * 强制销毁Modal（紧急情况使用）
    */
   forceDestroy() {
-    console.log("[SAFE] \u5F3A\u5236\u9500\u6BC1Modal");
     try {
       this.isClosing = true;
       this.isDestroying = true;
@@ -3781,17 +3729,13 @@ var RecordingModal = class extends import_obsidian3.Modal {
    * 通知外部取消当前处理
    */
   notifyCancellation() {
-    console.log(`\u53D6\u6D88\u5F55\u97F3\uFF0C\u5F53\u524D\u72B6\u6001: ${this.state}, \u5173\u95ED\u539F\u56E0: ${this.closeReason}`);
     if (this.hasNotifiedCancel) {
-      console.log("\u5DF2\u901A\u77E5\u53D6\u6D88\uFF0C\u8DF3\u8FC7\u91CD\u590D\u8C03\u7528");
       return;
     }
     if (this.closeReason === "cancelled" && this.onCancel) {
-      console.log("\u8C03\u7528\u53D6\u6D88\u56DE\u8C03\u901A\u77E5\u4E3B\u7A0B\u5E8F");
       this.hasNotifiedCancel = true;
       this.onCancel();
     } else {
-      console.log("\u975E\u7528\u6237\u4E3B\u52A8\u53D6\u6D88\uFF0C\u8DF3\u8FC7\u53D6\u6D88\u56DE\u8C03");
     }
   }
   /**
@@ -3807,7 +3751,6 @@ var RecordingModal = class extends import_obsidian3.Modal {
       this.destroyTimeout = null;
     }
     if (this.audioRecorder && this.audioRecorder.getRecordingState()) {
-      console.log("\u505C\u6B62\u5F55\u97F3...");
       this.audioRecorder.stopRecording();
     }
     this.audioRecorder = null;
@@ -4074,10 +4017,10 @@ var RecordingModal = class extends import_obsidian3.Modal {
   createProgressAreas() {
     this.imageProgress = this.imageSection.createDiv("image-progress");
     this.imageProgress.addClass("progress-area");
-    this.imageProgress.style.display = "none";
+    this.imageProgress.addClass("hidden");
     this.ocrProgress = this.imageSection.createDiv("ocr-progress");
     this.ocrProgress.addClass("progress-area");
-    this.ocrProgress.style.display = "none";
+    this.ocrProgress.addClass("hidden");
   }
   /**
    * 设置图片相关事件
@@ -4202,20 +4145,20 @@ var RecordingModal = class extends import_obsidian3.Modal {
    * 显示图片处理进度
    */
   showImageProgress(message) {
-    this.imageProgress.style.display = "block";
+    this.imageProgress.removeClass("hidden");
     this.imageProgress.textContent = message;
   }
   /**
    * 隐藏图片处理进度
    */
   hideImageProgress() {
-    this.imageProgress.style.display = "none";
+    this.imageProgress.addClass("hidden");
   }
   /**
    * 显示OCR进度
    */
   showOCRProgress(progress) {
-    this.ocrProgress.style.display = "block";
+    this.ocrProgress.removeClass("hidden");
     const progressText = `OCR\u5904\u7406\u4E2D: ${progress.currentFileName} (${progress.currentIndex}/${progress.totalImages})`;
     this.ocrProgress.textContent = progressText;
   }
@@ -4223,7 +4166,7 @@ var RecordingModal = class extends import_obsidian3.Modal {
    * 隐藏OCR进度
    */
   hideOCRProgress() {
-    this.ocrProgress.style.display = "none";
+    this.ocrProgress.addClass("hidden");
   }
   /**
    * 更新图片计数显示
@@ -4295,13 +4238,13 @@ var RecordingModal = class extends import_obsidian3.Modal {
   handleWakeLockChange(isActive, error) {
     console.log(`Wake Lock\u72B6\u6001\u53D8\u5316: ${isActive ? "\u6FC0\u6D3B" : "\u91CA\u653E"}`, error ? `\u9519\u8BEF: ${error}` : "");
     if (isActive) {
-      this.wakeLockIndicator.style.display = "flex";
+      this.wakeLockIndicator.removeClass("hidden");
       this.wakeLockText.setText("\u9632\u9501\u5C4F\u5DF2\u6FC0\u6D3B");
       this.wakeLockIndicator.removeClass("wake-lock-error");
       this.wakeLockIndicator.addClass("wake-lock-active");
     } else {
       if (error) {
-        this.wakeLockIndicator.style.display = "flex";
+        this.wakeLockIndicator.removeClass("hidden");
         this.wakeLockText.setText(`\u9632\u9501\u5C4F\u5931\u8D25: ${error}`);
         this.wakeLockIndicator.removeClass("wake-lock-active");
         this.wakeLockIndicator.addClass("wake-lock-error");
@@ -4309,7 +4252,7 @@ var RecordingModal = class extends import_obsidian3.Modal {
           this.showWakeLockFallbackHint();
         }
       } else {
-        this.wakeLockIndicator.style.display = "none";
+        this.wakeLockIndicator.addClass("hidden");
         this.wakeLockIndicator.removeClass("wake-lock-active", "wake-lock-error");
       }
     }
@@ -4432,7 +4375,6 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
       const hasAudio = audioBlob.size > 0;
       const hasImages = images && images.length > 0;
       const isMultimodal = hasAudio && hasImages;
-      console.log(`\u5F00\u59CB\u591A\u6A21\u6001\u5904\u7406 - \u97F3\u9891: ${hasAudio}, \u56FE\u7247: ${hasImages ? images.length : 0}\u5F20, \u591A\u6A21\u6001: ${isMultimodal}`);
       let audioMetadata = {};
       if (this.settings.keepOriginalAudio && hasAudio) {
         try {
@@ -4440,7 +4382,6 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
             this.recordingModal.updateProcessingState("saving-audio");
           }
           new import_obsidian4.Notice("\u6B63\u5728\u4FDD\u5B58\u97F3\u9891\u6587\u4EF6...");
-          console.log("\u5F00\u59CB\u4FDD\u5B58\u97F3\u9891\u6587\u4EF6");
           const tempFileName = this.noteGenerator.generateFileName("\u591A\u6A21\u6001\u7B14\u8BB0", new Date());
           const audioResult = await this.noteGenerator.saveAudioFile(
             audioBlob,
@@ -4452,13 +4393,11 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
             audioFilePath: audioResult.audioFilePath,
             audioBlob
           };
-          console.log("\u97F3\u9891\u6587\u4EF6\u4FDD\u5B58\u5B8C\u6210:", audioResult.audioFilePath);
         } catch (audioSaveError) {
           console.error("\u4FDD\u5B58\u97F3\u9891\u6587\u4EF6\u5931\u8D25:", audioSaveError);
           new import_obsidian4.Notice("\u4FDD\u5B58\u97F3\u9891\u6587\u4EF6\u5931\u8D25\uFF0C\u4F46\u4F1A\u7EE7\u7EED\u8FDB\u884C\u5904\u7406");
         }
         if (this.isProcessingCancelled) {
-          console.log("\u97F3\u9891\u4FDD\u5B58\u540E\u88AB\u7528\u6237\u53D6\u6D88");
           return;
         }
       }
@@ -4468,13 +4407,10 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
           this.recordingModal.updateProcessingState("transcribing");
         }
         new import_obsidian4.Notice("\u6B63\u5728\u8C03\u7528AI\u8F6C\u5F55\u97F3\u9891...");
-        console.log("\u5F00\u59CB\u8BED\u97F3\u8F6C\u5F55\u5904\u7406");
         transcribedText = await this.dashScopeClient.processAudio(audioBlob);
         if (this.isProcessingCancelled) {
-          console.log("\u8BED\u97F3\u8F6C\u5F55\u5DF2\u88AB\u7528\u6237\u53D6\u6D88");
           return;
         }
-        console.log("\u8BED\u97F3\u8F6C\u5F55\u5B8C\u6210\uFF0C\u6587\u672C\u957F\u5EA6:", transcribedText.length);
       }
       let ocrResults = /* @__PURE__ */ new Map();
       let totalOCRText = "";
@@ -4483,13 +4419,11 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
           this.recordingModal.updateProcessingState("ocr-processing");
         }
         new import_obsidian4.Notice(`\u6B63\u5728\u8BC6\u522B${images.length}\u5F20\u56FE\u7247\u4E2D\u7684\u6587\u5B57...`);
-        console.log(`\u5F00\u59CBOCR\u5904\u7406\uFF0C\u5171${images.length}\u5F20\u56FE\u7247`);
         const ocrPromises = images.map(async (image) => {
           try {
             const base64Data = image.originalDataUrl.split(",")[1];
             const result = await this.dashScopeClient.processImageOCR(base64Data, image.fileType);
             ocrResults.set(image.id, result);
-            console.log(`\u56FE\u7247${image.fileName}OCR\u5B8C\u6210\uFF0C\u8BC6\u522B\u6587\u5B57\u957F\u5EA6:`, result.text.length);
             return { imageId: image.id, result };
           } catch (error) {
             console.error(`\u56FE\u7247${image.fileName}OCR\u5931\u8D25:`, error);
@@ -4498,11 +4432,9 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
         });
         await Promise.all(ocrPromises);
         if (this.isProcessingCancelled) {
-          console.log("OCR\u5904\u7406\u5DF2\u88AB\u7528\u6237\u53D6\u6D88");
           return;
         }
         totalOCRText = Array.from(ocrResults.values()).map((result) => result.text).filter((text) => text.trim().length > 0).join("\n\n");
-        console.log("OCR\u5904\u7406\u5B8C\u6210\uFF0C\u603B\u6587\u5B57\u957F\u5EA6:", totalOCRText.length);
       }
       const multimodalContent = {
         audio: hasAudio ? {
@@ -4539,13 +4471,10 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
           this.recordingModal.updateProcessingState("processing");
         }
         new import_obsidian4.Notice("\u6B63\u5728\u4F7F\u7528AI\u5904\u7406\u591A\u6A21\u6001\u5185\u5BB9...");
-        console.log("\u5F00\u59CB\u591A\u6A21\u6001AI\u5904\u7406");
         multimodalResult = await this.textProcessor.processMultimodalContent(multimodalContent);
         if (this.isProcessingCancelled) {
-          console.log("\u591A\u6A21\u6001AI\u5904\u7406\u5DF2\u88AB\u7528\u6237\u53D6\u6D88");
           return;
         }
-        console.log("\u591A\u6A21\u6001AI\u5904\u7406\u5B8C\u6210\uFF0C\u662F\u5426\u5DF2\u5904\u7406:", multimodalResult.isProcessed);
       } else {
         multimodalResult = {
           audioText: transcribedText,
@@ -4565,7 +4494,6 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
       if (hasImages && this.settings.showOriginalImages) {
         try {
           new import_obsidian4.Notice("\u6B63\u5728\u4FDD\u5B58\u56FE\u7247\u6587\u4EF6...");
-          console.log("\u5F00\u59CB\u4FDD\u5B58\u56FE\u7247\u5230vault");
           for (const image of images) {
             const imageResult = await this.noteGenerator.saveImageFile(
               image,
@@ -4574,7 +4502,6 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
             image.vaultPath = imageResult.relativePath;
             image.vaultFile = imageResult.imageFile;
           }
-          console.log("\u56FE\u7247\u4FDD\u5B58\u5B8C\u6210");
         } catch (imageSaveError) {
           console.error("\u4FDD\u5B58\u56FE\u7247\u5931\u8D25:", imageSaveError);
           new import_obsidian4.Notice("\u4FDD\u5B58\u56FE\u7247\u5931\u8D25\uFF0C\u4F46\u4F1A\u7EE7\u7EED\u751F\u6210\u7B14\u8BB0");
@@ -4584,52 +4511,57 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
         this.recordingModal.updateProcessingState("saving");
       }
       if (this.isProcessingCancelled) {
-        console.log("\u4FDD\u5B58\u7B14\u8BB0\u5DF2\u88AB\u7528\u6237\u53D6\u6D88");
         return;
       }
       const processingDuration = Date.now() - processingStartTime;
       multimodalContent.metadata.totalProcessingTime = this.noteGenerator.formatDuration(processingDuration);
       multimodalContent.metadata.processedAt = new Date();
-      if (this.settings.autoSave) {
-        const fileName = this.noteGenerator.generateFileName(
-          isMultimodal ? "\u591A\u6A21\u6001\u7B14\u8BB0" : hasImages ? "\u56FE\u7247\u7B14\u8BB0" : "\u8BED\u97F3\u7B14\u8BB0",
-          multimodalContent.metadata.createdAt
-        );
-        const noteContent = this.noteGenerator.generateMultimodalNoteContent(
-          multimodalContent,
-          {
-            includeAudioSection: hasAudio,
-            includeOCRSection: hasImages && this.settings.includeOCRInNote,
-            includeImageSection: hasImages && this.settings.showOriginalImages,
-            includeSummarySection: multimodalResult.isProcessed,
-            includeMetadata: this.settings.includeMetadata,
-            audioOptions: {
-              includeOriginalAudio: this.settings.keepOriginalAudio,
-              showTranscription: true
+      try {
+        if (this.settings.autoSave) {
+          const fileName = this.noteGenerator.generateFileName(
+            isMultimodal ? "\u591A\u6A21\u6001\u7B14\u8BB0" : hasImages ? "\u56FE\u7247\u7B14\u8BB0" : "\u8BED\u97F3\u7B14\u8BB0",
+            multimodalContent.metadata.createdAt
+          );
+          const noteContent = this.noteGenerator.generateMultimodalNoteContent(
+            multimodalContent,
+            {
+              includeAudioSection: hasAudio,
+              includeOCRSection: hasImages && this.settings.includeOCRInNote,
+              includeImageSection: hasImages && this.settings.showOriginalImages,
+              includeSummarySection: multimodalResult.isProcessed,
+              includeMetadata: this.settings.includeMetadata,
+              audioOptions: {
+                includeOriginalAudio: this.settings.keepOriginalAudio,
+                showTranscription: true
+              },
+              imageOptions: {
+                includeOriginalImages: this.settings.showOriginalImages,
+                showOCRText: this.settings.includeOCRInNote,
+                thumbnailSize: "medium"
+              },
+              summaryOptions: {
+                generateTags: this.settings.generateTags,
+                generateSummary: true,
+                combineAudioAndOCR: this.settings.combineAudioAndOCR
+              }
             },
-            imageOptions: {
-              includeOriginalImages: this.settings.showOriginalImages,
-              showOCRText: this.settings.includeOCRInNote,
-              thumbnailSize: "medium"
-            },
-            summaryOptions: {
-              generateTags: this.settings.generateTags,
-              generateSummary: true,
-              combineAudioAndOCR: this.settings.combineAudioAndOCR
-            }
-          }
-        );
-        const savedFile = await this.noteGenerator.saveNote(
-          noteContent,
-          this.settings.outputFolder,
-          fileName
-        );
-        const contentSummary = this.generateCompletionMessage(multimodalResult, hasAudio, hasImages, audioMetadata.audioFileName);
-        new import_obsidian4.Notice(`${contentSummary}\u7B14\u8BB0\u5DF2\u4FDD\u5B58: ${savedFile.name}`);
-        console.log("\u591A\u6A21\u6001\u7B14\u8BB0\u4FDD\u5B58\u5B8C\u6210:", savedFile.path);
-      } else {
-        const message = multimodalResult.isProcessed ? "\u591A\u6A21\u6001AI\u5904\u7406\u5B8C\u6210\uFF0C\u8BF7\u624B\u52A8\u4FDD\u5B58\u7B14\u8BB0" : "\u591A\u6A21\u6001\u5185\u5BB9\u5904\u7406\u5B8C\u6210\uFF0C\u8BF7\u624B\u52A8\u4FDD\u5B58\u7B14\u8BB0";
-        new import_obsidian4.Notice(message);
+            multimodalResult
+            // 关键修复：传递AI处理结果
+          );
+          const savedFile = await this.noteGenerator.saveNote(
+            noteContent,
+            this.settings.outputFolder,
+            fileName
+          );
+          const contentSummary = this.generateCompletionMessage(multimodalResult, hasAudio, hasImages, audioMetadata.audioFileName);
+          new import_obsidian4.Notice(`${contentSummary}\u7B14\u8BB0\u5DF2\u4FDD\u5B58: ${savedFile.name}`);
+        } else {
+          const message = multimodalResult.isProcessed ? "\u591A\u6A21\u6001AI\u5904\u7406\u5B8C\u6210\uFF0C\u8BF7\u624B\u52A8\u4FDD\u5B58\u7B14\u8BB0" : "\u591A\u6A21\u6001\u5185\u5BB9\u5904\u7406\u5B8C\u6210\uFF0C\u8BF7\u624B\u52A8\u4FDD\u5B58\u7B14\u8BB0";
+          new import_obsidian4.Notice(message);
+        }
+      } catch (saveError) {
+        console.error("\u4FDD\u5B58\u7B14\u8BB0\u65F6\u51FA\u9519:", saveError);
+        new import_obsidian4.Notice(`\u4FDD\u5B58\u7B14\u8BB0\u5931\u8D25: ${saveError.message}`);
       }
       this.recordingModal = null;
     } catch (error) {
@@ -4667,10 +4599,8 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
   }
   handleRecordingCancel() {
     if (this.isProcessingCancelled) {
-      console.log("\u53D6\u6D88\u5DF2\u5904\u7406\uFF0C\u5FFD\u7565\u91CD\u590D\u8C03\u7528");
       return;
     }
-    console.log("\u7528\u6237\u53D6\u6D88\u4E86\u5F55\u97F3");
     this.isProcessingCancelled = true;
     new import_obsidian4.Notice("\u5F55\u97F3\u5DF2\u53D6\u6D88");
     if (this.recordingModal) {

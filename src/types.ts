@@ -354,14 +354,25 @@ export interface WakeLockOptions {
     type: 'screen'; // 目前只支持screen类型
     onActivated?: () => void;
     onReleased?: () => void;
-    onError?: (error: any) => void;
+    onError?: (error: Error | DOMException) => void;
 }
 
 // Wake Lock事件接口
 export interface WakeLockEvent {
     type: 'activated' | 'released' | 'error' | 'not_supported';
     timestamp: Date;
-    error?: any;
+    error?: Error | DOMException;
+}
+
+// ================================
+// Web API 类型扩展
+// ================================
+
+// 扩展Window接口以支持webkit前缀的AudioContext
+declare global {
+    interface Window {
+        webkitAudioContext?: typeof AudioContext;
+    }
 }
 
 // ================================

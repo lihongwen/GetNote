@@ -132,7 +132,6 @@ export default class GetNotePlugin extends Plugin {
 			const hasImages = images && images.length > 0;
 			const isMultimodal = hasAudio && hasImages;
 
-			console.log(`开始多模态处理 - 音频: ${hasAudio}, 图片: ${hasImages ? images.length : 0}张, 多模态: ${isMultimodal}`);
 
 			// 阶段0：保存音频文件（如果启用）
 			let audioMetadata: { audioFileName?: string; audioFilePath?: string; audioBlob?: Blob } = {};
@@ -144,8 +143,7 @@ export default class GetNotePlugin extends Plugin {
 					}
 					
 					new Notice('正在保存音频文件...');
-					console.log('开始保存音频文件');
-					
+						
 					const tempFileName = this.noteGenerator.generateFileName('多模态笔记', new Date());
 					const audioResult = await this.noteGenerator.saveAudioFile(
 						audioBlob,
@@ -159,16 +157,14 @@ export default class GetNotePlugin extends Plugin {
 						audioBlob: audioBlob
 					};
 					
-					console.log('音频文件保存完成:', audioResult.audioFilePath);
-				} catch (audioSaveError) {
+					} catch (audioSaveError) {
 					console.error('保存音频文件失败:', audioSaveError);
 					new Notice('保存音频文件失败，但会继续进行处理');
 				}
 				
 				// 检查音频保存后是否被取消
 				if (this.isProcessingCancelled) {
-					console.log('音频保存后被用户取消');
-					return;
+						return;
 				}
 			}
 
@@ -180,18 +176,15 @@ export default class GetNotePlugin extends Plugin {
 				}
 				
 				new Notice('正在调用AI转录音频...');
-				console.log('开始语音转录处理');
-
+	
 				transcribedText = await this.dashScopeClient.processAudio(audioBlob);
 				
 				// 检查是否被取消
 				if (this.isProcessingCancelled) {
-					console.log('语音转录已被用户取消');
-					return;
+						return;
 				}
 				
-				console.log('语音转录完成，文本长度:', transcribedText.length);
-			}
+				}
 
 			// 阶段2：OCR图片识别
 			let ocrResults: Map<string, OCRResult> = new Map();
@@ -202,8 +195,7 @@ export default class GetNotePlugin extends Plugin {
 				}
 				
 				new Notice(`正在识别${images.length}张图片中的文字...`);
-				console.log(`开始OCR处理，共${images.length}张图片`);
-
+	
 				// 并行处理所有图片OCR
 				const ocrPromises = images.map(async (image) => {
 					try {
@@ -211,8 +203,7 @@ export default class GetNotePlugin extends Plugin {
 						const base64Data = image.originalDataUrl.split(',')[1];
 						const result = await this.dashScopeClient.processImageOCR(base64Data, image.fileType);
 						ocrResults.set(image.id, result);
-						console.log(`图片${image.fileName}OCR完成，识别文字长度:`, result.text.length);
-						return { imageId: image.id, result };
+							return { imageId: image.id, result };
 					} catch (error) {
 						console.error(`图片${image.fileName}OCR失败:`, error);
 						return { imageId: image.id, error };
@@ -223,8 +214,7 @@ export default class GetNotePlugin extends Plugin {
 				
 				// 检查是否被取消
 				if (this.isProcessingCancelled) {
-					console.log('OCR处理已被用户取消');
-					return;
+						return;
 				}
 
 				// 合并所有OCR文本
@@ -233,8 +223,7 @@ export default class GetNotePlugin extends Plugin {
 					.filter(text => text.trim().length > 0)
 					.join('\n\n');
 				
-				console.log('OCR处理完成，总文字长度:', totalOCRText.length);
-			}
+				}
 
 			// 构建多模态内容
 			const multimodalContent: MultimodalContent = {
@@ -276,18 +265,15 @@ export default class GetNotePlugin extends Plugin {
 				}
 				
 				new Notice('正在使用AI处理多模态内容...');
-				console.log('开始多模态AI处理');
-				
+					
 				multimodalResult = await this.textProcessor.processMultimodalContent(multimodalContent);
 				
 				// 检查是否被取消
 				if (this.isProcessingCancelled) {
-					console.log('多模态AI处理已被用户取消');
-					return;
+						return;
 				}
 				
-				console.log('多模态AI处理完成，是否已处理:', multimodalResult.isProcessed);
-			} else {
+				} else {
 				// 不启用AI处理，构建基础结果
 				multimodalResult = {
 					audioText: transcribedText,
@@ -309,8 +295,7 @@ export default class GetNotePlugin extends Plugin {
 			if (hasImages && this.settings.showOriginalImages) {
 				try {
 					new Notice('正在保存图片文件...');
-					console.log('开始保存图片到vault');
-
+	
 					for (const image of images) {
 						const imageResult = await this.noteGenerator.saveImageFile(
 							image,
@@ -321,8 +306,7 @@ export default class GetNotePlugin extends Plugin {
 						image.vaultFile = imageResult.imageFile;
 					}
 					
-					console.log('图片保存完成');
-				} catch (imageSaveError) {
+					} catch (imageSaveError) {
 					console.error('保存图片失败:', imageSaveError);
 					new Notice('保存图片失败，但会继续生成笔记');
 				}
@@ -335,8 +319,7 @@ export default class GetNotePlugin extends Plugin {
 			
 			// 最后检查是否被取消
 			if (this.isProcessingCancelled) {
-				console.log('保存笔记已被用户取消');
-				return;
+					return;
 			}
 			
 			// 更新处理时间
@@ -345,6 +328,7 @@ export default class GetNotePlugin extends Plugin {
 			multimodalContent.metadata.processedAt = new Date();
 
 			// 保存笔记
+			try {
 			if (this.settings.autoSave) {
 				const fileName = this.noteGenerator.generateFileName(
 					isMultimodal ? '多模态笔记' : hasImages ? '图片笔记' : '语音笔记', 
@@ -374,7 +358,8 @@ export default class GetNotePlugin extends Plugin {
 							generateSummary: true,
 							combineAudioAndOCR: this.settings.combineAudioAndOCR
 						}
-					}
+					},
+					multimodalResult // 关键修复：传递AI处理结果
 				);
 
 				const savedFile = await this.noteGenerator.saveNote(
@@ -387,12 +372,15 @@ export default class GetNotePlugin extends Plugin {
 				const contentSummary = this.generateCompletionMessage(multimodalResult, hasAudio, hasImages, audioMetadata.audioFileName);
 				new Notice(`${contentSummary}笔记已保存: ${savedFile.name}`);
 				
-				console.log('多模态笔记保存完成:', savedFile.path);
-			} else {
+				} else {
 				const message = multimodalResult.isProcessed 
 					? '多模态AI处理完成，请手动保存笔记'
 					: '多模态内容处理完成，请手动保存笔记';
 				new Notice(message);
+			}
+			} catch (saveError) {
+				console.error('保存笔记时出错:', saveError);
+				new Notice(`保存笔记失败: ${saveError.message}`);
 			}
 			
 			// 清理录音Modal引用（正常完成）
@@ -446,11 +434,9 @@ export default class GetNotePlugin extends Plugin {
 	private handleRecordingCancel() {
 		// 防止重复调用
 		if (this.isProcessingCancelled) {
-			console.log('取消已处理，忽略重复调用');
 			return;
 		}
 		
-		console.log('用户取消了录音');
 		this.isProcessingCancelled = true;
 		
 		// 只显示一次取消通知

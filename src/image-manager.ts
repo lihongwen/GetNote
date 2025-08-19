@@ -77,7 +77,6 @@ export class ImageManager {
                 if (result.status === 'fulfilled' && result.value.success) {
                     this.images.set(result.value.imageItem.id, result.value.imageItem);
                     successful.push(result.value.imageItem);
-                    console.log(`添加图片成功: ${file.name}, 大小: ${this.formatFileSize(file.size)}`);
                 } else {
                     const error = result.status === 'fulfilled' ? result.value.error : result.reason;
                     failed.push(this.createProcessingError(file, 'processing', error));
@@ -123,7 +122,6 @@ export class ImageManager {
         this.images.delete(imageId);
         
         if (existed) {
-            console.log(`删除图片: ${imageId}`);
         }
         
         return existed;
@@ -156,7 +154,6 @@ export class ImageManager {
      * 清空所有图片
      */
     clearAllImages(): void {
-        console.log(`清空所有图片, 共${this.images.size}张`);
         this.images.clear();
     }
 
@@ -529,7 +526,7 @@ export class ImageManager {
         input.type = 'file';
         input.accept = this.supportedFormats.join(',');
         input.multiple = true;
-        input.style.display = 'none';
+        input.classList.add('hidden');
         
         return input;
     }
@@ -751,7 +748,6 @@ export class ImageManager {
         errors.forEach(error => {
             if (error.imageId && this.images.has(error.imageId)) {
                 this.images.delete(error.imageId);
-                console.log(`清理失败的图片记录: ${error.fileName}`);
             }
         });
     }
@@ -774,7 +770,6 @@ export class ImageManager {
             };
         }
 
-        console.log(`重试 ${retryFiles.length} 张可恢复的图片`);
         return await this.addImages(retryFiles);
     }
 

@@ -1,5 +1,67 @@
 /* ===== GetNote Plugin - 极简录音界面 ===== */
 
+/* 通用工具类 */
+.hidden {
+    display: none !important;
+}
+
+.visible {
+    display: block !important;
+}
+
+.invisible {
+    visibility: hidden !important;
+}
+
+.show {
+    opacity: 1 !important;
+    visibility: visible !important;
+}
+
+.hide {
+    opacity: 0 !important;
+    visibility: hidden !important;
+}
+
+/* 设置面板相关样式 */
+.wake-lock-status {
+    margin-top: 8px;
+    padding: 8px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+}
+
+.wake-lock-status.supported {
+    background-color: rgba(0, 200, 0, 0.1);
+    color: var(--color-green);
+    border: 1px solid rgba(0, 200, 0, 0.3);
+}
+
+.wake-lock-status.unsupported {
+    background-color: rgba(255, 140, 0, 0.1);
+    color: var(--color-orange);
+    border: 1px solid rgba(255, 140, 0, 0.3);
+}
+
+.wake-lock-details {
+    margin-top: 4px;
+    font-size: 0.75rem;
+    opacity: 0.8;
+}
+
+.test-result {
+    margin-top: 8px;
+    font-size: 14px;
+}
+
+.test-result.success {
+    color: #10b981;
+}
+
+.test-result.error {
+    color: #ef4444;
+}
+
 /* 基础样式重置 */
 .recording-modal {
     max-width: 400px;

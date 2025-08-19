@@ -112,7 +112,7 @@ export class RecordingModal extends Modal {
         
         // Wake Lock状态指示器
         this.wakeLockIndicator = container.createDiv('wake-lock-indicator');
-        this.wakeLockIndicator.style.display = 'none'; // 初始隐藏
+        this.wakeLockIndicator.addClass('hidden'); // 初始隐藏
         const wakeLockIcon = this.wakeLockIndicator.createDiv('wake-lock-icon');
         wakeLockIcon.setText('🔒');
         this.wakeLockText = this.wakeLockIndicator.createEl('span', { text: '防锁屏已激活' });
@@ -171,11 +171,9 @@ export class RecordingModal extends Modal {
     }
 
     onClose() {
-        console.log(`[SAFE] Modal onClose 被调用，状态: ${this.state}, 原因: ${this.closeReason}, isDestroying: ${this.isDestroying}`);
         
         // 第一层防护：防止重复执行
         if (this.isDestroying) {
-            console.log('[SAFE] Modal已在销毁过程中，跳过onClose处理');
             return;
         }
 
@@ -188,7 +186,6 @@ export class RecordingModal extends Modal {
             
             // 如果需要确认且还没确认，则显示确认对话框
             if (this.shouldConfirmClose() && this.closeReason !== 'normal') {
-                console.log('[SAFE] 需要用户确认，显示确认对话框');
                 // 重置销毁状态，允许用户选择
                 this.isDestroying = false;
                 this.showCloseConfirmation();
@@ -198,7 +195,6 @@ export class RecordingModal extends Modal {
             // 通知取消（如果需要）
             this.notifyCancellation();
             
-            console.log('[SAFE] Modal onClose 清理完成');
         } catch (error) {
             console.error('[SAFE] Modal onClose 清理时出错:', error);
         }
@@ -243,10 +239,8 @@ export class RecordingModal extends Modal {
             const confirmed = confirm(message);
             
             if (confirmed) {
-                console.log('[SAFE] 用户确认关闭，执行安全关闭流程');
                 this.safeClose();
             } else {
-                console.log('[SAFE] 用户取消关闭确认，继续当前状态');
                 // 重置状态，允许继续操作
                 this.isDestroying = false;
                 this.closeReason = 'manual';
@@ -284,7 +278,6 @@ export class RecordingModal extends Modal {
      * 安全关闭Modal - 使用异步机制防止递归
      */
     private safeClose(): void {
-        console.log(`[SAFE] safeClose 被调用，closeCallCount: ${this.closeCallCount}`);
         
         // 第二层防护：递归检测
         this.closeCallCount++;
@@ -301,7 +294,6 @@ export class RecordingModal extends Modal {
         
         this.destroyTimeout = window.setTimeout(() => {
             try {
-                console.log('[SAFE] 异步执行Modal关闭');
                 
                 // 设置关闭状态
                 this.isClosing = true;
@@ -313,7 +305,6 @@ export class RecordingModal extends Modal {
                 // 使用原生DOM方法关闭，避免触发onClose
                 this.containerEl.remove();
                 
-                console.log('[SAFE] Modal已安全关闭');
             } catch (error) {
                 console.error('[SAFE] 安全关闭过程中出错:', error);
                 this.forceDestroy();
@@ -325,7 +316,6 @@ export class RecordingModal extends Modal {
      * 强制销毁Modal（紧急情况使用）
      */
     private forceDestroy(): void {
-        console.log('[SAFE] 强制销毁Modal');
         try {
             this.isClosing = true;
             this.isDestroying = true;
@@ -363,21 +353,17 @@ export class RecordingModal extends Modal {
      * 通知外部取消当前处理
      */
     private notifyCancellation(): void {
-        console.log(`取消录音，当前状态: ${this.state}, 关闭原因: ${this.closeReason}`);
         
         // 防止重复通知
         if (this.hasNotifiedCancel) {
-            console.log('已通知取消，跳过重复调用');
             return;
         }
         
         // 只在用户主动取消时调用取消回调
         if (this.closeReason === 'cancelled' && this.onCancel) {
-            console.log('调用取消回调通知主程序');
             this.hasNotifiedCancel = true;
             this.onCancel();
         } else {
-            console.log('非用户主动取消，跳过取消回调');
         }
     }
 
@@ -399,7 +385,6 @@ export class RecordingModal extends Modal {
         
         // 如果正在录音，先停止
         if (this.audioRecorder && this.audioRecorder.getRecordingState()) {
-            console.log('停止录音...');
             this.audioRecorder.stopRecording();
         }
         
@@ -773,12 +758,12 @@ export class RecordingModal extends Modal {
         // 上传进度
         this.imageProgress = this.imageSection.createDiv('image-progress');
         this.imageProgress.addClass('progress-area');
-        this.imageProgress.style.display = 'none';
+        this.imageProgress.addClass('hidden');
         
         // OCR进度
         this.ocrProgress = this.imageSection.createDiv('ocr-progress');
         this.ocrProgress.addClass('progress-area');
-        this.ocrProgress.style.display = 'none';
+        this.ocrProgress.addClass('hidden');
     }
 
     /**
@@ -938,7 +923,7 @@ export class RecordingModal extends Modal {
      * 显示图片处理进度
      */
     private showImageProgress(message: string): void {
-        this.imageProgress.style.display = 'block';
+        this.imageProgress.removeClass('hidden');
         this.imageProgress.textContent = message;
     }
 
@@ -946,14 +931,14 @@ export class RecordingModal extends Modal {
      * 隐藏图片处理进度
      */
     private hideImageProgress(): void {
-        this.imageProgress.style.display = 'none';
+        this.imageProgress.addClass('hidden');
     }
 
     /**
      * 显示OCR进度
      */
     private showOCRProgress(progress: OCRProgress): void {
-        this.ocrProgress.style.display = 'block';
+        this.ocrProgress.removeClass('hidden');
         const progressText = `OCR处理中: ${progress.currentFileName} (${progress.currentIndex}/${progress.totalImages})`;
         this.ocrProgress.textContent = progressText;
     }
@@ -962,7 +947,7 @@ export class RecordingModal extends Modal {
      * 隐藏OCR进度
      */
     private hideOCRProgress(): void {
-        this.ocrProgress.style.display = 'none';
+        this.ocrProgress.addClass('hidden');
     }
 
     /**
@@ -1052,14 +1037,14 @@ export class RecordingModal extends Modal {
         
         if (isActive) {
             // Wake Lock激活
-            this.wakeLockIndicator.style.display = 'flex';
+            this.wakeLockIndicator.removeClass('hidden');
             this.wakeLockText.setText('防锁屏已激活');
             this.wakeLockIndicator.removeClass('wake-lock-error');
             this.wakeLockIndicator.addClass('wake-lock-active');
         } else {
             if (error) {
                 // Wake Lock出错
-                this.wakeLockIndicator.style.display = 'flex';
+                this.wakeLockIndicator.removeClass('hidden');
                 this.wakeLockText.setText(`防锁屏失败: ${error}`);
                 this.wakeLockIndicator.removeClass('wake-lock-active');
                 this.wakeLockIndicator.addClass('wake-lock-error');
@@ -1070,7 +1055,7 @@ export class RecordingModal extends Modal {
                 }
             } else {
                 // Wake Lock正常释放
-                this.wakeLockIndicator.style.display = 'none';
+                this.wakeLockIndicator.addClass('hidden');
                 this.wakeLockIndicator.removeClass('wake-lock-active', 'wake-lock-error');
             }
         }

@@ -59,7 +59,7 @@ export class AudioRecorder {
 
             // iOS特定AudioContext初始化
             if (this.isIOS && !this.audioContext) {
-                this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+                this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 // iOS需要在用户手势中启动AudioContext
                 if (this.audioContext.state === 'suspended') {
                     await this.audioContext.resume();
@@ -207,14 +207,12 @@ export class AudioRecorder {
 
         for (const type of types) {
             if (MediaRecorder.isTypeSupported(type)) {
-                console.log(`选择音频格式: ${type}`);
                 return type;
             }
         }
 
         // iOS默认使用MP4，其他平台使用webm
         const defaultType = this.isIOS ? 'audio/mp4' : 'audio/webm';
-        console.log(`使用默认音频格式: ${defaultType}`);
         return defaultType;
     }
 
@@ -473,7 +471,7 @@ export class AudioRecorder {
                 console.log('Wake Lock已主动释放');
                 this.wakeLock = null;
                 this.notifyWakeLockChange(false);
-            }).catch((error: any) => {
+            }).catch((error: Error | DOMException) => {
                 console.error('释放Wake Lock时出错:', error);
                 this.wakeLock = null;
                 this.notifyWakeLockChange(false, error?.message || '未知错误');
