@@ -595,6 +595,50 @@
     background: rgba(239, 68, 68, 1);
 }
 
+/* 增强版删除按钮样式 */
+.delete-button.enhanced-delete {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: 2px solid white;
+    background: #ff4757;
+    color: white;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    line-height: 1;
+    font-weight: bold;
+    opacity: 0.9;
+    transition: all 0.2s ease;
+    z-index: 10;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.delete-button.enhanced-delete:hover {
+    background: #ff3742;
+    opacity: 1;
+    transform: scale(1.1);
+    box-shadow: 0 3px 6px rgba(0, 0, 0, 0.4);
+}
+
+.delete-button.enhanced-delete:active {
+    transform: scale(0.95);
+}
+
+/* 确保删除按钮在图片项上始终可见 */
+.image-item .delete-button.enhanced-delete {
+    opacity: 0.8;
+}
+
+.image-item:hover .delete-button.enhanced-delete {
+    opacity: 1;
+}
+
 /* 图片信息 */
 .image-info {
     position: absolute;
@@ -812,9 +856,9 @@
     }
     
     .image-grid {
-        grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
-        gap: 6px;
-        max-height: 150px;
+        grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
+        gap: 8px;
+        max-height: 180px;
     }
     
     .image-upload-icon {
@@ -837,6 +881,35 @@
     .image-batch-btn {
         flex: 1;
         min-width: 80px;
+    }
+    
+    /* 手机端删除按钮优化 */
+    .delete-button.enhanced-delete {
+        width: 28px;
+        height: 28px;
+        font-size: 14px;
+        top: 2px;
+        right: 2px;
+        border-width: 2px;
+        /* 增加触摸目标大小 */
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
+    }
+    
+    /* 为手机端增加更明显的视觉反馈 */
+    .delete-button.enhanced-delete:active {
+        background: #ff2733;
+        transform: scale(0.9);
+    }
+    
+    /* 确保在小屏幕上删除按钮更加突出 */
+    .image-item .delete-button.enhanced-delete {
+        opacity: 0.95;
+    }
+    
+    .image-item:hover .delete-button.enhanced-delete,
+    .image-item:active .delete-button.enhanced-delete {
+        opacity: 1;
     }
 }
 

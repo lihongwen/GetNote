@@ -261,18 +261,22 @@ export class ImageManager {
             });
         }
 
-        // 检查重复文件名
+        // 处理重复文件名 - 自动重命名而不是报错
         const existingNames = new Set(this.getAllImages().map(img => img.fileName));
-        const duplicates = files.filter(file => existingNames.has(file.name));
-        duplicates.forEach(file => {
-            errors.push({
-                fileName: file.name,
-                errorType: 'validation',
-                errorMessage: '文件名已存在',
-                timestamp: new Date(),
-                recoverable: true,
-                suggestedAction: '重命名文件后重试'
-            });
+        files.forEach(file => {
+            if (existingNames.has(file.name)) {
+                // 生成唯一文件名
+                const uniqueName = this.generateUniqueFileName(file.name, existingNames);
+                // 为文件对象创建新的名称属性
+                Object.defineProperty(file, 'name', {
+                    value: uniqueName,
+                    writable: false,
+                    configurable: true
+                });
+                existingNames.add(uniqueName);
+            } else {
+                existingNames.add(file.name);
+            }
         });
 
         return errors;
@@ -394,6 +398,30 @@ export class ImageManager {
      */
     private generateImageId(): string {
         return `img_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    }
+
+    /**
+     * 生成唯一的文件名
+     * 如果文件名已存在，会在文件名后添加时间戳和序号
+     */
+    private generateUniqueFileName(originalName: string, existingNames: Set<string>): string {
+        // 分离文件名和扩展名
+        const lastDotIndex = originalName.lastIndexOf('.');
+        const nameWithoutExt = lastDotIndex > 0 ? originalName.substring(0, lastDotIndex) : originalName;
+        const extension = lastDotIndex > 0 ? originalName.substring(lastDotIndex) : '';
+        
+        // 使用时间戳创建唯一名称
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '');
+        let uniqueName = `${nameWithoutExt}_${timestamp}${extension}`;
+        
+        // 如果时间戳版本仍然重复，添加随机数
+        let counter = 1;
+        while (existingNames.has(uniqueName)) {
+            uniqueName = `${nameWithoutExt}_${timestamp}_${counter}${extension}`;
+            counter++;
+        }
+        
+        return uniqueName;
     }
 
     /**

@@ -3109,16 +3109,18 @@ var ImageManager = class {
       });
     }
     const existingNames = new Set(this.getAllImages().map((img) => img.fileName));
-    const duplicates = files.filter((file) => existingNames.has(file.name));
-    duplicates.forEach((file) => {
-      errors.push({
-        fileName: file.name,
-        errorType: "validation",
-        errorMessage: "\u6587\u4EF6\u540D\u5DF2\u5B58\u5728",
-        timestamp: new Date(),
-        recoverable: true,
-        suggestedAction: "\u91CD\u547D\u540D\u6587\u4EF6\u540E\u91CD\u8BD5"
-      });
+    files.forEach((file) => {
+      if (existingNames.has(file.name)) {
+        const uniqueName = this.generateUniqueFileName(file.name, existingNames);
+        Object.defineProperty(file, "name", {
+          value: uniqueName,
+          writable: false,
+          configurable: true
+        });
+        existingNames.add(uniqueName);
+      } else {
+        existingNames.add(file.name);
+      }
     });
     return errors;
   }
@@ -3220,6 +3222,23 @@ var ImageManager = class {
    */
   generateImageId() {
     return `img_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  }
+  /**
+   * 生成唯一的文件名
+   * 如果文件名已存在，会在文件名后添加时间戳和序号
+   */
+  generateUniqueFileName(originalName, existingNames) {
+    const lastDotIndex = originalName.lastIndexOf(".");
+    const nameWithoutExt = lastDotIndex > 0 ? originalName.substring(0, lastDotIndex) : originalName;
+    const extension = lastDotIndex > 0 ? originalName.substring(lastDotIndex) : "";
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "");
+    let uniqueName = `${nameWithoutExt}_${timestamp}${extension}`;
+    let counter = 1;
+    while (existingNames.has(uniqueName)) {
+      uniqueName = `${nameWithoutExt}_${timestamp}_${counter}${extension}`;
+      counter++;
+    }
+    return uniqueName;
   }
   /**
    * 将文件转换为Data URL
@@ -4116,12 +4135,15 @@ var RecordingModal = class extends import_obsidian3.Modal {
     const thumbnail = thumbnailContainer.createEl("img", { attr: { src: image.thumbnailDataUrl } });
     thumbnail.addClass("thumbnail");
     thumbnail.alt = image.fileName;
-    const deleteButton = thumbnailContainer.createEl("button", { text: "\xD7" });
+    const deleteButton = thumbnailContainer.createEl("button");
     deleteButton.addClass("delete-button");
+    deleteButton.addClass("enhanced-delete");
+    deleteButton.innerHTML = "\u274C";
     deleteButton.title = "\u5220\u9664\u56FE\u7247";
+    deleteButton.setAttribute("aria-label", "\u5220\u9664\u56FE\u7247");
     deleteButton.addEventListener("click", (e) => {
       e.stopPropagation();
-      this.removeImage(image.id);
+      this.handleImageDelete(image.id, image.fileName);
     });
     const infoContainer = itemEl.createDiv("image-info");
     const fileName = infoContainer.createEl("div", { text: image.fileName });
@@ -4131,7 +4153,20 @@ var RecordingModal = class extends import_obsidian3.Modal {
     return itemEl;
   }
   /**
-   * 删除图片
+   * 处理图片删除 - 增强版本，包含确认对话框
+   */
+  handleImageDelete(imageId, fileName) {
+    const isMobile = window.innerWidth <= 768;
+    const message = isMobile ? `\u5220\u9664\u56FE\u7247"${fileName}"\uFF1F` : `\u786E\u5B9A\u8981\u5220\u9664\u56FE\u7247"${fileName}"\u5417\uFF1F
+
+\u5220\u9664\u540E\u65E0\u6CD5\u6062\u590D\u3002`;
+    const confirmed = confirm(message);
+    if (confirmed) {
+      this.removeImage(imageId);
+    }
+  }
+  /**
+   * 删除图片 - 原有逻辑保持不变
    */
   removeImage(imageId) {
     const removed = this.imageManager.removeImage(imageId);

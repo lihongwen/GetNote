@@ -888,13 +888,18 @@ export class RecordingModal extends Modal {
         thumbnail.addClass('thumbnail');
         thumbnail.alt = image.fileName;
         
-        // 删除按钮
-        const deleteButton = thumbnailContainer.createEl('button', { text: '×' });
+        // 删除按钮 - 优化为更明显的样式
+        const deleteButton = thumbnailContainer.createEl('button');
         deleteButton.addClass('delete-button');
+        deleteButton.addClass('enhanced-delete'); // 新的增强样式类
+        deleteButton.innerHTML = '❌'; // 使用更明显的删除图标
         deleteButton.title = '删除图片';
+        deleteButton.setAttribute('aria-label', '删除图片');
+        
+        // 增强的删除功能，包含确认对话框
         deleteButton.addEventListener('click', (e) => {
             e.stopPropagation();
-            this.removeImage(image.id);
+            this.handleImageDelete(image.id, image.fileName);
         });
         
         // 文件信息
@@ -908,7 +913,24 @@ export class RecordingModal extends Modal {
     }
 
     /**
-     * 删除图片
+     * 处理图片删除 - 增强版本，包含确认对话框
+     */
+    private handleImageDelete(imageId: string, fileName: string): void {
+        // 在手机上使用简化的确认方式
+        const isMobile = window.innerWidth <= 768;
+        const message = isMobile 
+            ? `删除图片"${fileName}"？`
+            : `确定要删除图片"${fileName}"吗？\n\n删除后无法恢复。`;
+            
+        const confirmed = confirm(message);
+        
+        if (confirmed) {
+            this.removeImage(imageId);
+        }
+    }
+
+    /**
+     * 删除图片 - 原有逻辑保持不变
      */
     private removeImage(imageId: string): void {
         const removed = this.imageManager.removeImage(imageId);
