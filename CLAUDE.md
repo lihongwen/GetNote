@@ -38,7 +38,7 @@ This is an Obsidian plugin project named "getnote-plugin" that creates rich mult
 - ⚙️ **Settings UI**: Comprehensive API key management, model selection, output configuration, and testing
 - 📁 **Organization**: Automatic saving to configurable vault folders with enhanced metadata
 - 🎯 **Smart Format**: Clean text transcription with AI optimization and card-based structured notes
-- 🎨 **Simplified UI**: Four-button interface (Start/Pause/Stop/Cancel) with 7 processing states
+- 🎨 **Simplified UI**: Four-button interface (Start/Pause/Stop/Cancel) with 8 processing states
 - ⏱️ **Clear Status**: Enhanced status indicators for recording/transcribing/ocr-processing/processing/saving
 - 🌈 **Semantic Colors**: Green=Start, Orange=Pause, Red=Stop, Gray=Cancel for immediate recognition
 - 📱 **Responsive Design**: Optimized for both desktop and mobile devices
@@ -73,6 +73,7 @@ npm run version          # Bump version and update manifest.json/versions.json
 # Debug and testing
 # No formal test suite - testing done via manual Obsidian plugin loading
 # Debug via Chrome DevTools when plugin is loaded in Obsidian
+# An emergency close command is available for mobile debugging
 ```
 
 ## TypeScript Configuration
@@ -148,13 +149,14 @@ main.ts                  # Plugin entry point, coordinates complete multimodal p
 ### Key Architectural Patterns
 
 1. **Triple API Integration**: `DashScopeClient` handles three models - `qwen-audio-asr-latest` for speech, `qwen-vl-ocr-latest` for OCR, and `qwen-plus-latest` for text processing
-2. **Advanced State Management**: Recording modal manages 7 states (idle/recording/paused/saving-audio/transcribing/ocr-processing/processing/saving) with intelligent cancellation
+2. **Advanced State Management**: Recording modal manages 8 states (idle/recording/paused/saving-audio/transcribing/ocr-processing/processing/saving) with intelligent cancellation
 3. **Comprehensive Error Handling**: Multi-layer validation, timeout handling, and recovery mechanisms with detailed user feedback
 4. **Enhanced Image Management**: `ImageManager` provides validation, thumbnail generation, batch processing with detailed progress tracking
 5. **Advanced Multimodal Processing**: `TextProcessor` combines audio + OCR text for unified LLM analysis with structured tag generation
 6. **Six-Stage Processing Pipeline**: Audio recording → transcription → image OCR → combined LLM analysis → file saving → enhanced note generation
 7. **Wake Lock Integration**: Prevents screen lock during recording sessions for better user experience
 8. **Advanced Image Management**: Comprehensive validation, automatic filename deduplication, batch processing with error recovery
+9. **Robust Cancellation Logic**: Advanced cancellation handling with custom UI (including iOS support) to prevent data loss and UI freezes.
 
 ### Multimodal Data Flow
 
@@ -193,11 +195,13 @@ main.ts                  # Plugin entry point, coordinates complete multimodal p
   - 🔴 **Stop Button**: Red, "⏹️ 停止"
   - ⚪ **Cancel Button**: Gray, "❌ 取消"
 - **Time Display**: Large, monospace font with colon blinking during recording
-- **Advanced State Logic**: 7 states with complete transition management
-- **Smart Cancel Confirmation**: State-aware dialogs prevent accidental data loss
-  - Recording/Paused: "确定要取消录音吗？录音内容将会丢失"
-  - Processing: "正在处理录音，确定要取消吗？已录制内容将会丢失"
-  - Saving: "正在保存笔记，确定要取消吗？处理完成的内容可能丢失"
+- **Advanced State Logic**: 8 states with complete transition management
+- **Smart Cancel Confirmation**: State-aware confirmation dialogs with a custom iOS-friendly UI to prevent accidental data loss
+  - Recording/Paused: "确定要取消录音吗？录音内容将会丢失，无法恢复。"
+  - Saving Audio: "正在保存音频文件，确定要取消吗？录音和音频文件将会丢失。"
+  - Transcribing: "正在转录音频，确定要取消吗？已录制的内容将会丢失。"
+  - Processing: "正在处理录音，确定要取消吗？已录制和转录的内容将会丢失。"
+  - Saving: "正在保存笔记，确定要取消吗？处理完成的内容可能丢失。"
 - **Wake Lock Indicator**: Shows when screen lock prevention is active
 - **Image Upload Area**: Drag-and-drop support with thumbnail preview
 - **OCR Progress Display**: Real-time progress tracking for image processing
@@ -338,7 +342,7 @@ main.ts                  # Plugin entry point, coordinates complete multimodal p
 ### Key Constraints
 1. **CORS Limitation**: Cannot use standard `fetch()` - must use Obsidian's `requestUrl()`
 2. **Audio Processing**: 10MB limit, Base64 encoding required for API transmission  
-3. **State Management**: 7 processing states require careful coordination for cancel operations
+3. **State Management**: 8 processing states require careful coordination for cancel operations
 4. **LLM Fallback**: Text processing failures must gracefully fall back to raw transcription
 5. **Wake Lock**: Feature detection required, not supported in all environments
 

@@ -45,6 +45,15 @@ export default class GetNotePlugin extends Plugin {
 			}
 		});
 
+		// 添加紧急关闭命令（用于iPhone调试）
+		this.addCommand({
+			id: 'emergency-close-recording',
+			name: '强制关闭录音界面（紧急）',
+			callback: () => {
+				this.emergencyCloseRecording();
+			}
+		});
+
 		// 添加设置面板
 		this.addSettingTab(new GetNoteSettingTab(this.app, this));
 	}
@@ -55,6 +64,44 @@ export default class GetNotePlugin extends Plugin {
 		if (this.recordingModal) {
 			this.recordingModal.close();
 			this.recordingModal = null;
+		}
+	}
+
+	/**
+	 * 紧急关闭录音界面 - 用于iPhone调试
+	 */
+	private emergencyCloseRecording(): void {
+		console.log('[EMERGENCY] 执行紧急关闭录音界面');
+		
+		if (this.recordingModal) {
+			try {
+				// 使用Modal的紧急关闭方法
+				this.recordingModal.emergencyClose();
+				new Notice('已强制关闭录音界面');
+			} catch (error) {
+				console.error('[EMERGENCY] 紧急关闭失败:', error);
+				new Notice('紧急关闭失败，请刷新页面');
+			} finally {
+				this.recordingModal = null;
+			}
+		} else {
+			new Notice('没有找到活跃的录音界面');
+		}
+		
+		// 重置处理状态
+		this.isProcessingCancelled = true;
+		
+		// 额外安全措施：移除所有可能的Modal覆盖层
+		try {
+			const overlays = document.querySelectorAll('.modal, [style*="z-index: 10000"]');
+			overlays.forEach((overlay, index) => {
+				if (overlay.parentNode) {
+					console.log(`[EMERGENCY] 移除覆盖层 ${index + 1}:`, overlay);
+					overlay.parentNode.removeChild(overlay);
+				}
+			});
+		} catch (error) {
+			console.error('[EMERGENCY] 清理覆盖层时出错:', error);
 		}
 	}
 
