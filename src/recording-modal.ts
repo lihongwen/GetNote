@@ -62,6 +62,11 @@ export class RecordingModal extends Modal {
     private isDestroying: boolean = false;
     private hasNotifiedCancel: boolean = false;
     private closeCallCount: number = 0;
+    /**
+     * 关闭按钮监听移除器
+     * 在 onClose 中调用以清理事件，避免潜在泄漏
+     */
+    private _removeCloseListener?: () => void;
     private destroyTimeout: number | null = null;
 
     constructor(
@@ -213,6 +218,10 @@ export class RecordingModal extends Modal {
             console.error('[SAFE] Modal onClose 清理时出错:', error);
             // 出错时强制关闭
             this.forceDestroy();
+        } finally {
+            // 移除指针事件监听，防止内存泄漏
+            this._removeCloseListener?.();
+            this._removeCloseListener = undefined;
         }
     }
 
@@ -1212,70 +1221,28 @@ export class RecordingModal extends Modal {
      * 优雅方案：实现双重事件监听机制，解决iOS触摸事件冲突
      */
     private setupCustomCloseButton(): void {
-        // modalEl 是 Modal 类提供的对其顶层容器的引用
-        const closeButton = this.modalEl.querySelector('.modal-close-button');
-        
-        // 创建统一的、幂等的事件处理器
-        const createUnifiedCloseHandler = () => {
-            let isHandling = false; // 局部锁，防止重复执行
-            
-            return (e: Event) => {
-                // 防重复执行机制
-                if (isHandling) {
-                    console.log('[CLOSE] 处理中，忽略重复事件');
-                    return;
-                }
-                
-                // 立即设置锁并阻断事件传播
-                isHandling = true;
-                e.preventDefault();
-                e.stopPropagation();
-                
-                console.log(`[CLOSE] 关闭按钮事件触发 (${e.type})，调用 requestClose`);
-                
-                // 执行关闭逻辑
-                try {
-                    this.requestClose();
-                } finally {
-                    // 短暂延迟后释放锁，防止快速连击
-                    setTimeout(() => {
-                        isHandling = false;
-                    }, 200);
-                }
-            };
+        // 1. 获取真正的关闭按钮，如果不存在则退化到整个 modalEl
+        const closeButton = this.modalEl.querySelector<HTMLElement>('.modal-close-button') ?? this.modalEl;
+
+        // 2. 使用 Pointer Events 统一处理各种输入（mouse、touch、pen），避免 iOS 点击延迟
+        const pointerHandler = (e: PointerEvent) => {
+            // 只响应主按钮抬起事件，防止右键或辅助指针误触
+            if (e.button !== 0) return;
+
+            e.preventDefault();
+            e.stopPropagation();
+
+            console.log('[CLOSE] pointerup 触发，调用 requestClose');
+            this.requestClose();
         };
-        
-        if (closeButton) {
-            console.log('[CLOSE] 找到关闭按钮，设置双重事件监听');
-            
-            const unifiedHandler = createUnifiedCloseHandler();
-            
-            // 同时监听touchend和click事件，提高iOS兼容性
-            closeButton.addEventListener('touchend', unifiedHandler, true);
-            closeButton.addEventListener('click', unifiedHandler, true);
-            
-        } else {
-            console.log('[CLOSE] 未找到关闭按钮，使用备用方案');
-            
-            const unifiedHandler = createUnifiedCloseHandler();
-            
-            // 备用方案：监听整个模态框的事件
-            this.modalEl.addEventListener('touchend', (e) => {
-                const target = e.target as HTMLElement;
-                if (target && (target.classList.contains('modal-close-button') || 
-                              target.closest('.modal-close-button'))) {
-                    unifiedHandler(e);
-                }
-            }, true);
-            
-            this.modalEl.addEventListener('click', (e) => {
-                const target = e.target as HTMLElement;
-                if (target && (target.classList.contains('modal-close-button') || 
-                              target.closest('.modal-close-button'))) {
-                    unifiedHandler(e);
-                }
-            }, true);
-        }
+
+        // capture=true 保持与原逻辑一致；passive=false 以便阻止默认行为
+        closeButton.addEventListener('pointerup', pointerHandler, { capture: true, passive: false });
+
+        // 3. 记录移除器，保证 onClose 时清理
+        this._removeCloseListener = () => {
+            closeButton.removeEventListener('pointerup', pointerHandler, true);
+        };
     }
 
     /**
