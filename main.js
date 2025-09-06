@@ -3571,11 +3571,8 @@ var RecordingModal = class extends import_obsidian3.Modal {
       previewImageId: null
     };
     // Cancel confirmation and protection mechanism
-    this.isClosing = false;
-    this.isDestroying = false;
-    this.hasNotifiedCancel = false;
-    this.closeCallCount = 0;
-    this.destroyTimeout = null;
+    // 简化的关闭状态管理
+    this.isProcessingClose = false;
     this.onRecordingComplete = onRecordingComplete;
     this.onError = onError;
     this.enableLLMProcessing = enableLLMProcessing;
@@ -3614,9 +3611,6 @@ var RecordingModal = class extends import_obsidian3.Modal {
     const stopButtonEl = buttonGroup.createEl("button");
     stopButtonEl.addClass("stop-btn");
     this.stopButton = new import_obsidian3.ButtonComponent(stopButtonEl).setButtonText("\u505C\u6B62").setDisabled(true).onClick(() => this.handleStop());
-    const cancelButtonEl = buttonGroup.createEl("button");
-    cancelButtonEl.addClass("cancel-btn");
-    this.cancelButton = new import_obsidian3.ButtonComponent(cancelButtonEl).setButtonText("\u53D6\u6D88").onClick(() => this.handleCancel());
     const hintText = this.enableLLMProcessing ? "\u70B9\u51FB\u5F00\u59CB\u5F55\u97F3\uFF0C\u5B8C\u6210\u540E\u5C06\u8FDB\u884CAI\u8F6C\u5F55\u548C\u6587\u672C\u4F18\u5316" : "\u70B9\u51FB\u5F00\u59CB\u5F55\u97F3\uFF0C\u5F55\u97F3\u5B8C\u6210\u540E\u5C06\u81EA\u52A8\u8F6C\u6362\u4E3A\u6587\u5B57\u7B14\u8BB0";
     this.hintText = container.createEl("div", { text: hintText });
     this.hintText.addClass("simple-hint");
@@ -3624,172 +3618,74 @@ var RecordingModal = class extends import_obsidian3.Modal {
       this.createImageSection(container);
     }
     this.optimizeForIOS();
-    this.setupCustomCloseButton();
     this.updateUI();
   }
   /**
-   * 统一的关闭请求方法 - 优雅方案的核心
-   * 处理所有关闭请求的决策逻辑
+   * 打开插件设置
+   */
+  openPluginSettings() {
+    this.closeReason = "normal";
+    this.close();
+    setTimeout(() => {
+      var _a, _b;
+      (_a = this.app.setting) == null ? void 0 : _a.open();
+      (_b = this.app.setting) == null ? void 0 : _b.openTabById("getnote-plugin");
+    }, 100);
+  }
+  /**
+   * 简化的关闭请求处理
    */
   requestClose() {
-    console.log("[CLOSE] requestClose \u88AB\u8C03\u7528\uFF0C\u5F53\u524D\u72B6\u6001:", this.state, "\u5173\u95ED\u539F\u56E0:", this.closeReason);
-    const needsConfirmation = this.shouldConfirmClose() && this.closeReason !== "normal";
-    if (needsConfirmation) {
-      console.log("[CLOSE] \u9700\u8981\u786E\u8BA4\uFF0C\u663E\u793A\u786E\u8BA4\u5BF9\u8BDD\u6846");
-      if (this.detectIOS()) {
-        this.showIOSFriendlyConfirmation();
-      } else {
-        this.showCloseConfirmation();
-      }
+    if (this.isProcessingClose) {
+      return;
+    }
+    if (this.shouldConfirmClose()) {
+      this.showSimpleConfirmation();
     } else {
-      console.log("[CLOSE] \u65E0\u9700\u786E\u8BA4\uFF0C\u76F4\u63A5\u5173\u95ED");
       this.close();
     }
   }
   onClose() {
-    console.log("[CLOSE] onClose \u88AB\u8C03\u7528\uFF0C\u6267\u884C\u6700\u7EC8\u6E05\u7406");
-    this.isDestroying = true;
+    if (this.isProcessingClose) {
+      return;
+    }
+    this.isProcessingClose = true;
     try {
-      this.performFinalCleanup();
+      this.performCleanup();
+      if (this.closeReason === "cancelled" && this.onCancel) {
+        this.onCancel();
+      }
     } catch (error) {
-      console.error("[SAFE] Modal onClose \u6E05\u7406\u65F6\u51FA\u9519:", error);
-      this.forceDestroy();
+      console.error("Modal \u6E85\u7406\u65F6\u51FA\u9519:", error);
     }
   }
   /**
-   * 检查是否需要确认关闭（简化版本）
+   * 简化的关闭确认检查
    */
   shouldConfirmClose() {
-    console.log("[CLOSE] \u68C0\u67E5\u786E\u8BA4\u9700\u6C42 - \u72B6\u6001:", this.state, "\u5173\u95ED\u539F\u56E0:", this.closeReason, "\u662F\u5426\u5173\u95ED\u4E2D:", this.isClosing);
-    if (this.isClosing) {
+    if (this.state === "idle" || this.closeReason === "normal") {
       return false;
     }
-    if (this.closeReason === "normal") {
-      return false;
-    }
-    if (this.state === "idle") {
-      return false;
-    }
-    const hasRecordingData = this.state === "recording" || this.state === "paused";
-    const isProcessing = this.state === "transcribing" || this.state === "processing" || this.state === "ocr-processing";
-    const needsConfirm = hasRecordingData || isProcessing;
-    console.log("[CLOSE] \u786E\u8BA4\u9700\u6C42\u7ED3\u679C:", needsConfirm, "(\u5F55\u97F3\u6570\u636E:", hasRecordingData, "\u5904\u7406\u4E2D:", isProcessing, ")");
+    const needsConfirm = [
+      "recording",
+      "paused",
+      "saving-audio",
+      "transcribing",
+      "ocr-processing",
+      "processing",
+      "saving"
+    ].includes(this.state);
     return needsConfirm;
   }
   /**
-   * 显示关闭确认对话框（非iOS设备）
+   * 显示简化的确认对话框
    */
-  showCloseConfirmation() {
+  showSimpleConfirmation() {
     const message = this.getConfirmationMessage();
-    setTimeout(() => {
-      let confirmed = false;
-      try {
-        confirmed = confirm(message);
-        console.log("[CLOSE] \u7528\u6237\u786E\u8BA4\u7ED3\u679C:", confirmed);
-      } catch (error) {
-        console.error("[CLOSE] confirm()\u8C03\u7528\u5931\u8D25:", error);
-        confirmed = true;
-      }
-      if (confirmed) {
-        this.close();
-      } else {
-        this.closeReason = "manual";
-        console.log("[CLOSE] \u7528\u6237\u53D6\u6D88\u5173\u95ED\uFF0C\u91CD\u7F6E\u72B6\u6001");
-      }
-    }, 10);
-  }
-  /**
-   * iOS友好的确认对话框（使用界面内确认）
-   */
-  showIOSFriendlyConfirmation() {
-    console.log("[CLOSE] \u663E\u793AiOS\u53CB\u597D\u786E\u8BA4\u5BF9\u8BDD\u6846");
-    const confirmOverlay = document.createElement("div");
-    confirmOverlay.style.cssText = `
-            position: fixed;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(0, 0, 0, 0.5);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 10000;
-            backdrop-filter: blur(4px);
-        `;
-    const confirmDialog = document.createElement("div");
-    confirmDialog.style.cssText = `
-            background: white;
-            border-radius: 12px;
-            padding: 24px;
-            margin: 20px;
-            max-width: 320px;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
-        `;
-    const message = this.getConfirmationMessage();
-    confirmDialog.innerHTML = `
-            <div style="font-size: 18px; font-weight: 600; margin-bottom: 12px; color: #333;">
-                \u786E\u8BA4\u5173\u95ED
-            </div>
-            <div style="font-size: 15px; line-height: 1.4; color: #666; margin-bottom: 20px;">
-                ${message.replace(/\n/g, "<br>")}
-            </div>
-            <div style="display: flex; gap: 12px;">
-                <button id="cancelBtn" style="
-                    flex: 1; padding: 12px; border: 1px solid #ddd; 
-                    background: white; border-radius: 6px; font-size: 16px;
-                ">\u53D6\u6D88</button>
-                <button id="confirmBtn" style="
-                    flex: 1; padding: 12px; border: none; 
-                    background: #ff4444; color: white; border-radius: 6px; font-size: 16px;
-                ">\u786E\u8BA4\u5173\u95ED</button>
-            </div>
-        `;
-    confirmOverlay.appendChild(confirmDialog);
-    document.body.appendChild(confirmOverlay);
-    const cancelBtn = confirmDialog.querySelector("#cancelBtn");
-    const confirmBtn = confirmDialog.querySelector("#confirmBtn");
-    const cleanup = () => {
-      document.body.removeChild(confirmOverlay);
-    };
-    cancelBtn == null ? void 0 : cancelBtn.addEventListener("click", () => {
-      console.log("[CLOSE] iOS\u786E\u8BA4\uFF1A\u7528\u6237\u53D6\u6D88");
-      cleanup();
-      this.closeReason = "manual";
-    });
-    confirmBtn == null ? void 0 : confirmBtn.addEventListener("click", () => {
-      console.log("[CLOSE] iOS\u786E\u8BA4\uFF1A\u7528\u6237\u786E\u8BA4\u5173\u95ED");
-      cleanup();
+    if (confirm(message)) {
       this.close();
-    });
-    confirmOverlay.addEventListener("click", (e) => {
-      if (e.target === confirmOverlay) {
-        console.log("[CLOSE] iOS\u786E\u8BA4\uFF1A\u70B9\u51FB\u5916\u90E8\u53D6\u6D88");
-        cleanup();
-        this.closeReason = "manual";
-      }
-    });
-    setTimeout(() => {
-      if (document.body.contains(confirmOverlay)) {
-        console.log("[CLOSE] iOS\u786E\u8BA4\u8D85\u65F6\uFF0C\u81EA\u52A8\u5173\u95ED");
-        cleanup();
-        this.close();
-      }
-    }, 3e4);
-  }
-  /**
-   * 直接关闭（无需确认）
-   */
-  performDirectClose() {
-    console.log("[CLOSE] \u6267\u884C\u76F4\u63A5\u5173\u95ED");
-    this.performCleanup();
-    this.notifyCancellation();
-    this.isClosing = true;
-    this.isDestroying = true;
-    try {
-      super.close();
-    } catch (error) {
-      console.error("[CLOSE] \u8C03\u7528super.close()\u5931\u8D25:", error);
-      if (this.containerEl && this.containerEl.parentNode) {
-        this.containerEl.parentNode.removeChild(this.containerEl);
-      }
+    } else {
+      this.closeReason = "manual";
     }
   }
   /**
@@ -3813,106 +3709,12 @@ var RecordingModal = class extends import_obsidian3.Modal {
     }
   }
   /**
-   * 安全关闭Modal - 使用异步机制防止递归
-   */
-  safeClose() {
-    this.closeCallCount++;
-    if (this.closeCallCount > 3) {
-      console.error("[SAFE] \u68C0\u6D4B\u5230\u8FC7\u591A\u5173\u95ED\u8C03\u7528\uFF0C\u5F3A\u5236\u4E2D\u65AD");
-      this.forceDestroy();
-      return;
-    }
-    if (this.destroyTimeout) {
-      clearTimeout(this.destroyTimeout);
-    }
-    this.destroyTimeout = window.setTimeout(() => {
-      try {
-        this.isClosing = true;
-        this.isDestroying = true;
-        this.performFinalCleanup();
-        this.containerEl.remove();
-      } catch (error) {
-        console.error("[SAFE] \u5B89\u5168\u5173\u95ED\u8FC7\u7A0B\u4E2D\u51FA\u9519:", error);
-        this.forceDestroy();
-      }
-    }, 0);
-  }
-  /**
-   * 强制销毁Modal（紧急情况使用）
-   */
-  forceDestroy() {
-    console.log("[CLOSE] \u6267\u884C\u5F3A\u5236\u9500\u6BC1");
-    try {
-      this.isClosing = true;
-      this.isDestroying = true;
-      if (this.destroyTimeout) {
-        clearTimeout(this.destroyTimeout);
-        this.destroyTimeout = null;
-      }
-      this.performCleanup();
-      const existingOverlays = document.querySelectorAll('[style*="z-index: 10000"]');
-      existingOverlays.forEach((overlay) => {
-        if (overlay.parentNode === document.body) {
-          document.body.removeChild(overlay);
-        }
-      });
-      let closed = false;
-      try {
-        super.close();
-        closed = true;
-        console.log("[CLOSE] \u901A\u8FC7super.close()\u6210\u529F\u5173\u95ED");
-      } catch (error) {
-        console.log("[CLOSE] super.close()\u5931\u8D25:", error);
-      }
-      if (!closed && this.containerEl && this.containerEl.parentNode) {
-        this.containerEl.parentNode.removeChild(this.containerEl);
-        closed = true;
-        console.log("[CLOSE] \u901A\u8FC7DOM\u79FB\u9664\u6210\u529F\u5173\u95ED");
-      }
-      if (!closed && this.containerEl) {
-        this.containerEl.style.display = "none";
-        this.containerEl.style.visibility = "hidden";
-        this.containerEl.style.opacity = "0";
-        console.log("[CLOSE] \u901A\u8FC7\u9690\u85CF\u5143\u7D20\u5173\u95ED");
-      }
-    } catch (error) {
-      console.error("[SAFE] \u5F3A\u5236\u9500\u6BC1\u65F6\u51FA\u9519:", error);
-      if (this.containerEl) {
-        this.containerEl.style.display = "none";
-      }
-    }
-  }
-  /**
-   * 执行最终清理（包含通知）
-   */
-  performFinalCleanup() {
-    this.notifyCancellation();
-    this.performCleanup();
-  }
-  /**
-   * 通知外部取消当前处理
-   */
-  notifyCancellation() {
-    if (this.hasNotifiedCancel) {
-      return;
-    }
-    if (this.closeReason === "cancelled" && this.onCancel) {
-      this.hasNotifiedCancel = true;
-      this.onCancel();
-    } else {
-    }
-  }
-  /**
    * 执行资源清理
    */
   performCleanup() {
     if (this.timerInterval) {
       clearInterval(this.timerInterval);
       this.timerInterval = null;
-    }
-    if (this.destroyTimeout) {
-      clearTimeout(this.destroyTimeout);
-      this.destroyTimeout = null;
     }
     if (this.audioRecorder && this.audioRecorder.getRecordingState()) {
       this.audioRecorder.stopRecording();
@@ -3932,10 +3734,7 @@ var RecordingModal = class extends import_obsidian3.Modal {
       previewImageId: null
     };
     this.state = "idle";
-    this.isClosing = false;
     this.closeReason = "manual";
-    this.hasNotifiedCancel = false;
-    this.closeCallCount = 0;
   }
   async handleStart() {
     var _a;
@@ -3996,11 +3795,6 @@ var RecordingModal = class extends import_obsidian3.Modal {
       this.audioRecorder.stopRecording();
     }
   }
-  handleCancel() {
-    console.log("[SAFE] \u7528\u6237\u70B9\u51FB\u53D6\u6D88\u6309\u94AE");
-    this.closeReason = "cancelled";
-    this.requestClose();
-  }
   async handleRecordingComplete(audioBlob) {
     try {
       if (this.timerInterval) {
@@ -4017,16 +3811,7 @@ var RecordingModal = class extends import_obsidian3.Modal {
     }
   }
   handleRecordingError(error) {
-    console.log("[SAFE] \u5F55\u97F3\u9519\u8BEF\uFF0C\u91CD\u7F6E\u72B6\u6001");
     this.setState("idle");
-    this.isClosing = false;
-    this.isDestroying = false;
-    this.hasNotifiedCancel = false;
-    this.closeCallCount = 0;
-    if (this.destroyTimeout) {
-      clearTimeout(this.destroyTimeout);
-      this.destroyTimeout = null;
-    }
     this.onError(error);
   }
   setState(newState) {
@@ -4044,7 +3829,6 @@ var RecordingModal = class extends import_obsidian3.Modal {
         this.startButton.setDisabled(false).setButtonText("\u5F00\u59CB\u5F55\u97F3");
         this.pauseButton.setDisabled(true);
         this.stopButton.setDisabled(true);
-        this.cancelButton.setDisabled(true);
         break;
       case "recording":
         this.statusContainer.addClass("status-recording");
@@ -4054,7 +3838,6 @@ var RecordingModal = class extends import_obsidian3.Modal {
         this.startButton.setDisabled(true);
         this.pauseButton.setDisabled(false);
         this.stopButton.setDisabled(false);
-        this.cancelButton.setDisabled(false);
         break;
       case "paused":
         this.statusContainer.addClass("status-paused");
@@ -4064,7 +3847,6 @@ var RecordingModal = class extends import_obsidian3.Modal {
         this.startButton.setDisabled(false).setButtonText("\u7EE7\u7EED\u5F55\u97F3");
         this.pauseButton.setDisabled(true);
         this.stopButton.setDisabled(false);
-        this.cancelButton.setDisabled(false);
         break;
       case "saving-audio":
         this.statusContainer.addClass("status-recording");
@@ -4074,7 +3856,6 @@ var RecordingModal = class extends import_obsidian3.Modal {
         this.startButton.setDisabled(true);
         this.pauseButton.setDisabled(true);
         this.stopButton.setDisabled(true);
-        this.cancelButton.setDisabled(false).setButtonText("\u53D6\u6D88");
         break;
       case "transcribing":
         this.statusContainer.addClass("status-recording");
@@ -4084,7 +3865,6 @@ var RecordingModal = class extends import_obsidian3.Modal {
         this.startButton.setDisabled(true);
         this.pauseButton.setDisabled(true);
         this.stopButton.setDisabled(true);
-        this.cancelButton.setDisabled(false).setButtonText("\u53D6\u6D88");
         break;
       case "ocr-processing":
         this.statusContainer.addClass("status-recording");
@@ -4094,7 +3874,6 @@ var RecordingModal = class extends import_obsidian3.Modal {
         this.startButton.setDisabled(true);
         this.pauseButton.setDisabled(true);
         this.stopButton.setDisabled(true);
-        this.cancelButton.setDisabled(false).setButtonText("\u53D6\u6D88");
         break;
       case "processing":
         this.statusContainer.addClass("status-recording");
@@ -4104,7 +3883,6 @@ var RecordingModal = class extends import_obsidian3.Modal {
         this.startButton.setDisabled(true);
         this.pauseButton.setDisabled(true);
         this.stopButton.setDisabled(true);
-        this.cancelButton.setDisabled(false).setButtonText("\u53D6\u6D88");
         break;
       case "saving":
         this.statusContainer.addClass("status-recording");
@@ -4114,7 +3892,6 @@ var RecordingModal = class extends import_obsidian3.Modal {
         this.startButton.setDisabled(true);
         this.pauseButton.setDisabled(true);
         this.stopButton.setDisabled(true);
-        this.cancelButton.setDisabled(false).setButtonText("\u53D6\u6D88");
         break;
     }
   }
@@ -4382,33 +4159,7 @@ var RecordingModal = class extends import_obsidian3.Modal {
    * 检测是否为iOS设备
    */
   detectIOS() {
-    return AudioRecorder.detectIOSStatic();
-  }
-  /**
-   * 设置自定义关闭按钮逻辑 - 接管右上角的 'x' 按钮
-   */
-  setupCustomCloseButton() {
-    const closeButton = this.modalEl.querySelector(".modal-close-button");
-    if (closeButton) {
-      console.log("[CLOSE] \u627E\u5230\u5173\u95ED\u6309\u94AE\uFF0C\u63A5\u7BA1\u5176\u884C\u4E3A");
-      closeButton.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        console.log("[CLOSE] \u53F3\u4E0A\u89D2\u5173\u95ED\u6309\u94AE\u88AB\u70B9\u51FB\uFF0C\u8C03\u7528 requestClose");
-        this.requestClose();
-      }, true);
-    } else {
-      console.log("[CLOSE] \u672A\u627E\u5230\u5173\u95ED\u6309\u94AE\uFF0C\u53EF\u80FD\u662F\u4E0D\u540C\u7684\u6A21\u6001\u6846\u7ED3\u6784");
-      this.modalEl.addEventListener("click", (e) => {
-        const target = e.target;
-        if (target && (target.classList.contains("modal-close-button") || target.closest(".modal-close-button"))) {
-          e.preventDefault();
-          e.stopPropagation();
-          console.log("[CLOSE] \u901A\u8FC7\u5907\u7528\u65B9\u6848\u6355\u83B7\u5173\u95ED\u6309\u94AE\u70B9\u51FB");
-          this.requestClose();
-        }
-      }, true);
-    }
+    return /iPad|iPhone|iPod/.test(navigator.userAgent);
   }
   /**
    * iOS特定的UI优化
@@ -4484,31 +4235,11 @@ var RecordingModal = class extends import_obsidian3.Modal {
     return `Wake Lock - \u652F\u6301:${state.isSupported}, \u6FC0\u6D3B:${state.isActive}, \u542F\u7528:${state.isEnabled}`;
   }
   /**
-   * 紧急关闭方法 - 供外部调用，确保界面一定能关闭
+   * 紧急关闭方法 - 供外部调用
    */
   emergencyClose() {
-    console.log("[EMERGENCY] \u6267\u884C\u7D27\u6025\u5173\u95ED");
-    this.isClosing = false;
-    this.isDestroying = false;
-    this.hasNotifiedCancel = false;
-    this.closeCallCount = 0;
     this.closeReason = "normal";
-    this.state = "idle";
-    this.forceDestroy();
-  }
-  /**
-   * 检查当前是否可以正常关闭（调试用）
-   */
-  getCloseStatus() {
-    const needsConfirm = this.shouldConfirmClose();
-    return {
-      canClose: !needsConfirm,
-      reason: needsConfirm ? "\u9700\u8981\u7528\u6237\u786E\u8BA4" : "\u53EF\u4EE5\u76F4\u63A5\u5173\u95ED",
-      state: this.state,
-      closeReason: this.closeReason,
-      isDestroying: this.isDestroying,
-      isClosing: this.isClosing
-    };
+    this.close();
   }
 };
 
@@ -4519,6 +4250,7 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
     this.dashScopeClient = null;
     this.recordingModal = null;
     this.textProcessor = null;
+    this.closeRibbonIcon = null;
     // 取消状态管理
     this.isProcessingCancelled = false;
   }
@@ -4533,11 +4265,31 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
     this.addRibbonIcon("microphone", "\u6253\u5F00\u5F55\u97F3\u754C\u9762", (evt) => {
       this.openRecordingModal();
     });
+    const closeRibbonIcon = this.addRibbonIcon("square", "\u5173\u95ED\u5F55\u97F3\u754C\u9762", (evt) => {
+      this.closeRecordingGracefully();
+    });
+    closeRibbonIcon.style.display = "none";
+    this.closeRibbonIcon = closeRibbonIcon;
     this.addCommand({
       id: "open-recording-modal",
       name: "\u6253\u5F00\u5F55\u97F3\u754C\u9762",
       callback: () => {
         this.openRecordingModal();
+      }
+    });
+    this.addCommand({
+      id: "close-recording",
+      name: "GetNote: \u5173\u95ED\u5F55\u97F3\u754C\u9762",
+      hotkeys: [{ modifiers: ["Mod"], key: "Escape" }],
+      checkCallback: (checking) => {
+        const hasActiveRecording = this.recordingModal !== null;
+        if (hasActiveRecording) {
+          if (!checking) {
+            this.closeRecordingGracefully();
+          }
+          return true;
+        }
+        return false;
       }
     });
     this.addCommand({
@@ -4555,9 +4307,44 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
       this.recordingModal.close();
       this.recordingModal = null;
     }
+    this.hideCloseRibbonIcon();
+    this.closeRibbonIcon = null;
   }
   /**
-   * 紧急关闭录音界面 - 用于iPhone调试
+   * 显示关闭录音界面按钮
+   */
+  showCloseRibbonIcon() {
+    if (this.closeRibbonIcon) {
+      this.closeRibbonIcon.style.display = "";
+    }
+  }
+  /**
+   * 隐藏关闭录音界面按钮
+   */
+  hideCloseRibbonIcon() {
+    if (this.closeRibbonIcon) {
+      this.closeRibbonIcon.style.display = "none";
+    }
+  }
+  /**
+   * 优雅关闭录音界面 - 主要的关闭方法
+   */
+  closeRecordingGracefully() {
+    console.log("[CLOSE] \u6267\u884C\u4F18\u96C5\u5173\u95ED\u5F55\u97F3\u754C\u9762");
+    if (this.recordingModal) {
+      try {
+        this.recordingModal.close();
+        new import_obsidian4.Notice("\u6B63\u5728\u5173\u95ED\u5F55\u97F3\u754C\u9762...");
+      } catch (error) {
+        console.error("[CLOSE] \u4F18\u96C5\u5173\u95ED\u5931\u8D25\uFF0C\u5C1D\u8BD5\u7D27\u6025\u5173\u95ED:", error);
+        this.emergencyCloseRecording();
+      }
+    } else {
+      new import_obsidian4.Notice("\u6CA1\u6709\u6D3B\u8DC3\u7684\u5F55\u97F3\u754C\u9762\u9700\u8981\u5173\u95ED");
+    }
+  }
+  /**
+   * 紧急关闭录音界面 - 用于iPhone调试和故障恢复
    */
   emergencyCloseRecording() {
     console.log("[EMERGENCY] \u6267\u884C\u7D27\u6025\u5173\u95ED\u5F55\u97F3\u754C\u9762");
@@ -4570,6 +4357,7 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
         new import_obsidian4.Notice("\u7D27\u6025\u5173\u95ED\u5931\u8D25\uFF0C\u8BF7\u5237\u65B0\u9875\u9762");
       } finally {
         this.recordingModal = null;
+        this.hideCloseRibbonIcon();
       }
     } else {
       new import_obsidian4.Notice("\u6CA1\u6709\u627E\u5230\u6D3B\u8DC3\u7684\u5F55\u97F3\u754C\u9762");
@@ -4625,6 +4413,7 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
       () => this.handleRecordingCancel()
     );
     this.recordingModal.open();
+    this.showCloseRibbonIcon();
   }
   async handleMultimodalData(audioBlob, images) {
     const processingStartTime = Date.now();
@@ -4830,6 +4619,7 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
         new import_obsidian4.Notice(`\u4FDD\u5B58\u7B14\u8BB0\u5931\u8D25: ${saveError.message}`);
       }
       this.recordingModal = null;
+      this.hideCloseRibbonIcon();
     } catch (error) {
       console.error("\u5904\u7406\u591A\u6A21\u6001\u5185\u5BB9\u65F6\u51FA\u9519:", error);
       new import_obsidian4.Notice(`\u5904\u7406\u591A\u6A21\u6001\u5185\u5BB9\u65F6\u51FA\u9519: ${error.message}`);
@@ -4841,9 +4631,11 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
           console.error("\u9519\u8BEF\u5904\u7406\u671F\u95F4\u5173\u95EDModal\u5931\u8D25:", modalError);
         } finally {
           this.recordingModal = null;
+          this.hideCloseRibbonIcon();
         }
       } else {
         this.recordingModal = null;
+        this.hideCloseRibbonIcon();
       }
     }
   }
@@ -4858,9 +4650,11 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
         console.error("\u5173\u95EDModal\u65F6\u51FA\u9519:", modalError);
       } finally {
         this.recordingModal = null;
+        this.hideCloseRibbonIcon();
       }
     } else {
       this.recordingModal = null;
+      this.hideCloseRibbonIcon();
     }
   }
   handleRecordingCancel() {
@@ -4871,6 +4665,7 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
     new import_obsidian4.Notice("\u5F55\u97F3\u5DF2\u53D6\u6D88");
     if (this.recordingModal) {
       this.recordingModal = null;
+      this.hideCloseRibbonIcon();
     }
   }
   /**

@@ -14,6 +14,7 @@ export default class GetNotePlugin extends Plugin {
 	private noteGenerator: NoteGenerator;
 	private recordingModal: RecordingModal | null = null;
 	private textProcessor: TextProcessor | null = null;
+	private closeRibbonIcon: HTMLElement | null = null;
 	
 	// 取消状态管理
 	private isProcessingCancelled: boolean = false;
@@ -36,6 +37,17 @@ export default class GetNotePlugin extends Plugin {
 			this.openRecordingModal();
 		});
 
+		// 添加关闭录音界面按钮到工具栏（仅在录音界面开启时显示）
+		const closeRibbonIcon = this.addRibbonIcon('square', '关闭录音界面', (evt: MouseEvent) => {
+			this.closeRecordingGracefully();
+		});
+		
+		// 初始状态下隐藏关闭按钮
+		closeRibbonIcon.style.display = 'none';
+		
+		// 保存关闭按钮引用用于动态显示/隐藏
+		this.closeRibbonIcon = closeRibbonIcon;
+
 		// 添加命令
 		this.addCommand({
 			id: 'open-recording-modal',
@@ -45,7 +57,25 @@ export default class GetNotePlugin extends Plugin {
 			}
 		});
 
-		// 添加紧急关闭命令（用于iPhone调试）
+		// 添加关闭录音界面命令 - 优化为在系统菜单中显示
+		this.addCommand({
+			id: 'close-recording',
+			name: 'GetNote: 关闭录音界面',
+			hotkeys: [{ modifiers: ["Mod"], key: "Escape" }],
+			checkCallback: (checking: boolean) => {
+				// 只在有活跃录音界面时显示此命令
+				const hasActiveRecording = this.recordingModal !== null;
+				if (hasActiveRecording) {
+					if (!checking) {
+						this.closeRecordingGracefully();
+					}
+					return true;
+				}
+				return false;
+			}
+		});
+
+		// 保留紧急关闭命令作为备用（用于调试和故障恢复）
 		this.addCommand({
 			id: 'emergency-close-recording',
 			name: '强制关闭录音界面（紧急）',
@@ -65,10 +95,52 @@ export default class GetNotePlugin extends Plugin {
 			this.recordingModal.close();
 			this.recordingModal = null;
 		}
+		// 清理ribbon icon引用
+		this.hideCloseRibbonIcon();
+		this.closeRibbonIcon = null;
 	}
 
 	/**
-	 * 紧急关闭录音界面 - 用于iPhone调试
+	 * 显示关闭录音界面按钮
+	 */
+	private showCloseRibbonIcon(): void {
+		if (this.closeRibbonIcon) {
+			this.closeRibbonIcon.style.display = '';
+		}
+	}
+
+	/**
+	 * 隐藏关闭录音界面按钮
+	 */
+	private hideCloseRibbonIcon(): void {
+		if (this.closeRibbonIcon) {
+			this.closeRibbonIcon.style.display = 'none';
+		}
+	}
+
+	/**
+	 * 优雅关闭录音界面 - 主要的关闭方法
+	 */
+	private closeRecordingGracefully(): void {
+		console.log('[CLOSE] 执行优雅关闭录音界面');
+		
+		if (this.recordingModal) {
+			try {
+				// 使用Modal的正常关闭方法，这会触发确认对话框
+				this.recordingModal.close();
+				new Notice('正在关闭录音界面...');
+			} catch (error) {
+				console.error('[CLOSE] 优雅关闭失败，尝试紧急关闭:', error);
+				// 如果优雅关闭失败，回退到紧急关闭
+				this.emergencyCloseRecording();
+			}
+		} else {
+			new Notice('没有活跃的录音界面需要关闭');
+		}
+	}
+
+	/**
+	 * 紧急关闭录音界面 - 用于iPhone调试和故障恢复
 	 */
 	private emergencyCloseRecording(): void {
 		console.log('[EMERGENCY] 执行紧急关闭录音界面');
@@ -83,6 +155,7 @@ export default class GetNotePlugin extends Plugin {
 				new Notice('紧急关闭失败，请刷新页面');
 			} finally {
 				this.recordingModal = null;
+				this.hideCloseRibbonIcon();
 			}
 		} else {
 			new Notice('没有找到活跃的录音界面');
@@ -154,6 +227,9 @@ export default class GetNotePlugin extends Plugin {
 		);
 		
 		this.recordingModal.open();
+		
+		// 显示关闭按钮
+		this.showCloseRibbonIcon();
 	}
 
 	private async handleMultimodalData(audioBlob: Blob, images?: ImageItem[]) {
@@ -432,6 +508,7 @@ export default class GetNotePlugin extends Plugin {
 			
 			// 清理录音Modal引用（正常完成）
 			this.recordingModal = null;
+			this.hideCloseRibbonIcon();
 
 		} catch (error) {
 			console.error('处理多模态内容时出错:', error);
@@ -448,9 +525,11 @@ export default class GetNotePlugin extends Plugin {
 					console.error('错误处理期间关闭Modal失败:', modalError);
 				} finally {
 					this.recordingModal = null;
+					this.hideCloseRibbonIcon();
 				}
 			} else {
 				this.recordingModal = null;
+				this.hideCloseRibbonIcon();
 			}
 		}
 	}
@@ -472,9 +551,11 @@ export default class GetNotePlugin extends Plugin {
 				// 强制清理引用，防止悬挂状态
 			} finally {
 				this.recordingModal = null;
+				this.hideCloseRibbonIcon();
 			}
 		} else {
 			this.recordingModal = null;
+			this.hideCloseRibbonIcon();
 		}
 	}
 
@@ -492,6 +573,7 @@ export default class GetNotePlugin extends Plugin {
 		// 清理Modal引用
 		if (this.recordingModal) {
 			this.recordingModal = null;
+			this.hideCloseRibbonIcon();
 		}
 	}
 

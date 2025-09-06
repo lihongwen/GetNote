@@ -21,12 +21,12 @@ export class RecordingModal extends Modal {
     private startButton: ButtonComponent;
     private pauseButton: ButtonComponent;
     private stopButton: ButtonComponent;
-    private cancelButton: ButtonComponent;
     private hintText: HTMLElement;
     
     // Wake Lock状态显示
     private wakeLockIndicator: HTMLElement;
     private wakeLockText: HTMLElement;
+    
     
     // 图片相关UI元素
     private imageSection: HTMLElement;
@@ -58,16 +58,8 @@ export class RecordingModal extends Modal {
     };
     
     // Cancel confirmation and protection mechanism
-    private isClosing: boolean = false;
-    private isDestroying: boolean = false;
-    private hasNotifiedCancel: boolean = false;
-    private closeCallCount: number = 0;
-    /**
-     * 关闭按钮监听移除器
-     * 在 onClose 中调用以清理事件，避免潜在泄漏
-     */
-    private _removeCloseListener?: () => void;
-    private destroyTimeout: number | null = null;
+    // 简化的关闭状态管理
+    private isProcessingClose: boolean = false;
 
     constructor(
         app: App, 
@@ -148,13 +140,6 @@ export class RecordingModal extends Modal {
             .setButtonText('停止')
             .setDisabled(true)
             .onClick(() => this.handleStop());
-
-        // 取消按钮
-        const cancelButtonEl = buttonGroup.createEl('button');
-        cancelButtonEl.addClass('cancel-btn');
-        this.cancelButton = new ButtonComponent(cancelButtonEl)
-            .setButtonText('取消')
-            .onClick(() => this.handleCancel());
         
         // 提示文字
         const hintText = this.enableLLMProcessing 
@@ -171,248 +156,98 @@ export class RecordingModal extends Modal {
         // iOS特定优化
         this.optimizeForIOS();
         
-        // 优雅方案的关键：接管默认的关闭按钮
-        this.setupCustomCloseButton();
-        
         // 设置初始状态
         this.updateUI();
     }
 
+
+
+    
     /**
-     * 统一的关闭请求方法 - 优雅方案的核心
-     * 处理所有关闭请求的决策逻辑
+     * 打开插件设置
+     */
+    private openPluginSettings(): void {
+        // 先关闭当前模态框
+        this.closeReason = 'normal';
+        this.close();
+        
+        // 打开Obsidian设置页面并导航到插件配置
+        setTimeout(() => {
+            (this.app as any).setting?.open();
+            (this.app as any).setting?.openTabById('getnote-plugin');
+        }, 100);
+    }
+
+    /**
+     * 简化的关闭请求处理
      */
     private requestClose(): void {
-        console.log('[CLOSE] requestClose 被调用，当前状态:', this.state, '关闭原因:', this.closeReason);
+        if (this.isProcessingClose) {
+            return;
+        }
         
-        const needsConfirmation = this.shouldConfirmClose() && this.closeReason !== 'normal';
-        
-        if (needsConfirmation) {
-            console.log('[CLOSE] 需要确认，显示确认对话框');
-            // 如果需要确认，显示对应的确认对话框
-            if (this.detectIOS()) {
-                this.showIOSFriendlyConfirmation();
-            } else {
-                this.showCloseConfirmation();
-            }
+        if (this.shouldConfirmClose()) {
+            this.showSimpleConfirmation();
         } else {
-            console.log('[CLOSE] 无需确认，直接关闭');
-            // 如果不需要确认，直接调用框架的 close() 方法
-            // 这会正常触发 onClose() 以进行清理
             this.close();
         }
     }
 
     onClose() {
-        console.log('[CLOSE] onClose 被调用，执行最终清理');
+        if (this.isProcessingClose) {
+            return;
+        }
         
-        // 现在的 onClose 非常干净，只负责清理工作
-        // 移除所有保护性标志，因为只有在真正关闭时才会调用
-        this.isDestroying = true;
+        this.isProcessingClose = true;
         
         try {
-            // 调用现有的清理和通知逻辑
-            this.performFinalCleanup();
             
+            // 执行清理
+            this.performCleanup();
+            
+            // 通知取消（如果需要）
+            if (this.closeReason === 'cancelled' && this.onCancel) {
+                this.onCancel();
+            }
         } catch (error) {
-            console.error('[SAFE] Modal onClose 清理时出错:', error);
-            // 出错时强制关闭
-            this.forceDestroy();
-        } finally {
-            // 移除指针事件监听，防止内存泄漏
-            this._removeCloseListener?.();
-            this._removeCloseListener = undefined;
+            console.error('Modal 溅理时出错:', error);
         }
     }
 
     /**
-     * 检查是否需要确认关闭（简化版本）
+     * 简化的关闭确认检查
      */
     private shouldConfirmClose(): boolean {
-        console.log('[CLOSE] 检查确认需求 - 状态:', this.state, '关闭原因:', this.closeReason, '是否关闭中:', this.isClosing);
-        
-        // 如果已经在关闭过程中，不需要确认
-        if (this.isClosing) {
+        // idle状态或正常完成不需要确认
+        if (this.state === 'idle' || this.closeReason === 'normal') {
             return false;
         }
-
-        // 正常完成不需要确认
-        if (this.closeReason === 'normal') {
-            return false;
-        }
-
-        // idle状态不需要确认
-        if (this.state === 'idle') {
-            return false;
-        }
-
-        // 简化确认条件：只在真正有数据丢失风险时才确认
-        // 1. 正在录音或已暂停（有录音数据）
-        const hasRecordingData = this.state === 'recording' || this.state === 'paused';
         
-        // 2. 正在处理中（有处理进度）
-        const isProcessing = this.state === 'saving-audio' ||
-                           this.state === 'transcribing' || 
-                           this.state === 'processing' || 
-                           this.state === 'ocr-processing' ||
-                           this.state === 'saving';
-        
-        const needsConfirm = hasRecordingData || isProcessing;
-        console.log('[CLOSE] 确认需求结果:', needsConfirm, '(录音数据:', hasRecordingData, '处理中:', isProcessing, ')');
+        // 正在录音、暂停或处理中需要确认
+        const needsConfirm = [
+            'recording', 'paused', 'saving-audio', 
+            'transcribing', 'ocr-processing', 'processing', 'saving'
+        ].includes(this.state);
         
         return needsConfirm;
     }
 
     /**
-     * 显示关闭确认对话框（非iOS设备）
+     * 显示简化的确认对话框
      */
-    private showCloseConfirmation(): void {
+    private showSimpleConfirmation(): void {
         const message = this.getConfirmationMessage();
         
-        // 使用异步方式显示确认对话框，避免阻塞调用栈
-        setTimeout(() => {
-            let confirmed = false;
-            
-            try {
-                confirmed = confirm(message);
-                console.log('[CLOSE] 用户确认结果:', confirmed);
-            } catch (error) {
-                console.error('[CLOSE] confirm()调用失败:', error);
-                // confirm失败时，默认允许关闭以避免用户被困
-                confirmed = true;
-            }
-            
-            if (confirmed) {
-                // 用户确认关闭，直接调用框架的 close() 方法
-                this.close();
-            } else {
-                // 重置状态，允许继续操作  
-                this.closeReason = 'manual';
-                console.log('[CLOSE] 用户取消关闭，重置状态');
-            }
-        }, 10);
-    }
-
-    /**
-     * iOS友好的确认对话框（使用界面内确认）
-     */
-    private showIOSFriendlyConfirmation(): void {
-        console.log('[CLOSE] 显示iOS友好确认对话框');
-        
-        // 创建界面内确认对话框
-        const confirmOverlay = document.createElement('div');
-        confirmOverlay.style.cssText = `
-            position: fixed;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(0, 0, 0, 0.5);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 10000;
-            backdrop-filter: blur(4px);
-        `;
-        
-        const confirmDialog = document.createElement('div');
-        confirmDialog.style.cssText = `
-            background: white;
-            border-radius: 12px;
-            padding: 24px;
-            margin: 20px;
-            max-width: 320px;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
-        `;
-        
-        const message = this.getConfirmationMessage();
-        confirmDialog.innerHTML = `
-            <div style="font-size: 18px; font-weight: 600; margin-bottom: 12px; color: #333;">
-                确认关闭
-            </div>
-            <div style="font-size: 15px; line-height: 1.4; color: #666; margin-bottom: 20px;">
-                ${message.replace(/\n/g, '<br>')}
-            </div>
-            <div style="display: flex; gap: 12px;">
-                <button id="cancelBtn" style="
-                    flex: 1; padding: 12px; border: 1px solid #ddd; 
-                    background: white; border-radius: 6px; font-size: 16px;
-                ">取消</button>
-                <button id="confirmBtn" style="
-                    flex: 1; padding: 12px; border: none; 
-                    background: #ff4444; color: white; border-radius: 6px; font-size: 16px;
-                ">确认关闭</button>
-            </div>
-        `;
-        
-        confirmOverlay.appendChild(confirmDialog);
-        document.body.appendChild(confirmOverlay);
-        
-        // 绑定按钮事件
-        const cancelBtn = confirmDialog.querySelector('#cancelBtn');
-        const confirmBtn = confirmDialog.querySelector('#confirmBtn');
-        
-        const cleanup = () => {
-            document.body.removeChild(confirmOverlay);
-        };
-        
-        cancelBtn?.addEventListener('click', () => {
-            console.log('[CLOSE] iOS确认：用户取消');
-            cleanup();
-            this.closeReason = 'manual';
-        });
-        
-        confirmBtn?.addEventListener('click', () => {
-            console.log('[CLOSE] iOS确认：用户确认关闭');
-            cleanup();
-            // 用户确认关闭，直接调用框架的 close() 方法
+        if (confirm(message)) {
             this.close();
-        });
-        
-        // 点击外部区域取消
-        confirmOverlay.addEventListener('click', (e) => {
-            if (e.target === confirmOverlay) {
-                console.log('[CLOSE] iOS确认：点击外部取消');
-                cleanup();
-                this.closeReason = 'manual';
-            }
-        });
-        
-        // 设置超时保护，防止界面卡死
-        setTimeout(() => {
-            if (document.body.contains(confirmOverlay)) {
-                console.log('[CLOSE] iOS确认超时，自动关闭');
-                cleanup();
-                // 超时后直接调用框架的 close() 方法
-                this.close();
-            }
-        }, 30000); // 30秒超时
-    }
-
-    /**
-     * 直接关闭（无需确认）
-     */
-    private performDirectClose(): void {
-        console.log('[CLOSE] 执行直接关闭');
-        
-        // 执行清理
-        this.performCleanup();
-        
-        // 通知取消（如果需要）
-        this.notifyCancellation();
-        
-        // 直接关闭Modal
-        this.isClosing = true;
-        this.isDestroying = true;
-        
-        try {
-            // 使用Obsidian的close方法
-            super.close();
-        } catch (error) {
-            console.error('[CLOSE] 调用super.close()失败:', error);
-            // 备用：直接移除DOM
-            if (this.containerEl && this.containerEl.parentNode) {
-                this.containerEl.parentNode.removeChild(this.containerEl);
-            }
+        } else {
+            this.closeReason = 'manual';
         }
     }
+    
+    
+
+
 
     /**
      * 根据当前状态获取确认消息
@@ -440,136 +275,11 @@ export class RecordingModal extends Modal {
         }
     }
 
-    /**
-     * 安全关闭Modal - 使用异步机制防止递归
-     */
-    private safeClose(): void {
-        
-        // 第二层防护：递归检测
-        this.closeCallCount++;
-        if (this.closeCallCount > 3) {
-            console.error('[SAFE] 检测到过多关闭调用，强制中断');
-            this.forceDestroy();
-            return;
-        }
-        
-        // 第一层防护：使用 setTimeout 打破调用栈
-        if (this.destroyTimeout) {
-            clearTimeout(this.destroyTimeout);
-        }
-        
-        this.destroyTimeout = window.setTimeout(() => {
-            try {
-                
-                // 设置关闭状态
-                this.isClosing = true;
-                this.isDestroying = true;
-                
-                // 执行最终的清理和通知
-                this.performFinalCleanup();
-                
-                // 使用原生DOM方法关闭，避免触发onClose
-                this.containerEl.remove();
-                
-            } catch (error) {
-                console.error('[SAFE] 安全关闭过程中出错:', error);
-                this.forceDestroy();
-            }
-        }, 0);
-    }
 
-    /**
-     * 强制销毁Modal（紧急情况使用）
-     */
-    private forceDestroy(): void {
-        console.log('[CLOSE] 执行强制销毁');
-        
-        try {
-            this.isClosing = true;
-            this.isDestroying = true;
-            
-            // 清理所有定时器
-            if (this.destroyTimeout) {
-                clearTimeout(this.destroyTimeout);
-                this.destroyTimeout = null;
-            }
-            
-            // 强制清理资源
-            this.performCleanup();
-            
-            // 移除任何可能存在的iOS确认对话框
-            const existingOverlays = document.querySelectorAll('[style*="z-index: 10000"]');
-            existingOverlays.forEach(overlay => {
-                if (overlay.parentNode === document.body) {
-                    document.body.removeChild(overlay);
-                }
-            });
-            
-            // 多种方式尝试关闭Modal
-            let closed = false;
-            
-            // 方式1：调用父类close方法
-            try {
-                super.close();
-                closed = true;
-                console.log('[CLOSE] 通过super.close()成功关闭');
-            } catch (error) {
-                console.log('[CLOSE] super.close()失败:', error);
-            }
-            
-            // 方式2：直接移除DOM元素
-            if (!closed && this.containerEl && this.containerEl.parentNode) {
-                this.containerEl.parentNode.removeChild(this.containerEl);
-                closed = true;
-                console.log('[CLOSE] 通过DOM移除成功关闭');
-            }
-            
-            // 方式3：隐藏元素（最后的手段）
-            if (!closed && this.containerEl) {
-                this.containerEl.style.display = 'none';
-                this.containerEl.style.visibility = 'hidden';
-                this.containerEl.style.opacity = '0';
-                console.log('[CLOSE] 通过隐藏元素关闭');
-            }
-            
-        } catch (error) {
-            console.error('[SAFE] 强制销毁时出错:', error);
-            // 即使出错也要尝试隐藏界面
-            if (this.containerEl) {
-                this.containerEl.style.display = 'none';
-            }
-        }
-    }
 
-    /**
-     * 执行最终清理（包含通知）
-     */
-    private performFinalCleanup(): void {
-        // 通知外部取消处理
-        this.notifyCancellation();
-        
-        // 执行基础清理
-        this.performCleanup();
-    }
 
-    /**
-     * 通知外部取消当前处理
-     */
-    private notifyCancellation(): void {
-        
-        // 防止重复通知
-        if (this.hasNotifiedCancel) {
-            return;
-        }
-        
-        // 只在用户主动取消时调用取消回调
-        if (this.closeReason === 'cancelled' && this.onCancel) {
-            this.hasNotifiedCancel = true;
-            this.onCancel();
-        } else {
-        }
-    }
 
+    
     /**
      * 执行资源清理
      */
@@ -580,11 +290,6 @@ export class RecordingModal extends Modal {
             this.timerInterval = null;
         }
         
-        // 清理销毁定时器
-        if (this.destroyTimeout) {
-            clearTimeout(this.destroyTimeout);
-            this.destroyTimeout = null;
-        }
         
         // 如果正在录音，先停止
         if (this.audioRecorder && this.audioRecorder.getRecordingState()) {
@@ -613,10 +318,7 @@ export class RecordingModal extends Modal {
         
         // 重置状态
         this.state = 'idle';
-        this.isClosing = false;
-        this.closeReason = 'manual'; // 重置关闭原因
-        this.hasNotifiedCancel = false; // 重置取消通知标志
-        this.closeCallCount = 0; // 重置调用计数器
+        this.closeReason = 'manual';
     }
 
     private async handleStart() {
@@ -697,13 +399,6 @@ export class RecordingModal extends Modal {
         }
     }
 
-    private handleCancel() {
-        console.log('[SAFE] 用户点击取消按钮');
-        // 设置为用户取消，需要确认对话框
-        this.closeReason = 'cancelled';
-        // 调用统一的关闭请求方法
-        this.requestClose();
-    }
 
     private async handleRecordingComplete(audioBlob: Blob) {
         try {
@@ -735,21 +430,7 @@ export class RecordingModal extends Modal {
     }
 
     private handleRecordingError(error: Error) {
-        console.log('[SAFE] 录音错误，重置状态');
         this.setState('idle');
-        
-        // 错误恢复：重置所有保护状态
-        this.isClosing = false;
-        this.isDestroying = false;
-        this.hasNotifiedCancel = false;
-        this.closeCallCount = 0;
-        
-        // 清理定时器
-        if (this.destroyTimeout) {
-            clearTimeout(this.destroyTimeout);
-            this.destroyTimeout = null;
-        }
-        
         this.onError(error);
     }
 
@@ -776,7 +457,6 @@ export class RecordingModal extends Modal {
                 this.startButton.setDisabled(false).setButtonText('开始录音');
                 this.pauseButton.setDisabled(true);
                 this.stopButton.setDisabled(true);
-                this.cancelButton.setDisabled(true);
                 break;
                 
             case 'recording':
@@ -789,7 +469,6 @@ export class RecordingModal extends Modal {
                 this.startButton.setDisabled(true);
                 this.pauseButton.setDisabled(false);
                 this.stopButton.setDisabled(false);
-                this.cancelButton.setDisabled(false);
                 break;
                 
             case 'paused':
@@ -802,7 +481,6 @@ export class RecordingModal extends Modal {
                 this.startButton.setDisabled(false).setButtonText('继续录音');
                 this.pauseButton.setDisabled(true);
                 this.stopButton.setDisabled(false);
-                this.cancelButton.setDisabled(false);
                 break;
                 
             case 'saving-audio':
@@ -815,7 +493,6 @@ export class RecordingModal extends Modal {
                 this.startButton.setDisabled(true);
                 this.pauseButton.setDisabled(true);
                 this.stopButton.setDisabled(true);
-                this.cancelButton.setDisabled(false).setButtonText('取消');
                 break;
                 
             case 'transcribing':
@@ -828,7 +505,6 @@ export class RecordingModal extends Modal {
                 this.startButton.setDisabled(true);
                 this.pauseButton.setDisabled(true);
                 this.stopButton.setDisabled(true);
-                this.cancelButton.setDisabled(false).setButtonText('取消');
                 break;
                 
             case 'ocr-processing':
@@ -841,7 +517,6 @@ export class RecordingModal extends Modal {
                 this.startButton.setDisabled(true);
                 this.pauseButton.setDisabled(true);
                 this.stopButton.setDisabled(true);
-                this.cancelButton.setDisabled(false).setButtonText('取消');
                 break;
                 
             case 'processing':
@@ -854,7 +529,6 @@ export class RecordingModal extends Modal {
                 this.startButton.setDisabled(true);
                 this.pauseButton.setDisabled(true);
                 this.stopButton.setDisabled(true);
-                this.cancelButton.setDisabled(false).setButtonText('取消');
                 break;
                 
             case 'saving':
@@ -867,7 +541,6 @@ export class RecordingModal extends Modal {
                 this.startButton.setDisabled(true);
                 this.pauseButton.setDisabled(true);
                 this.stopButton.setDisabled(true);
-                this.cancelButton.setDisabled(false).setButtonText('取消');
                 break;
         }
     }
@@ -1213,37 +886,9 @@ export class RecordingModal extends Modal {
      * 检测是否为iOS设备
      */
     private detectIOS(): boolean {
-        return AudioRecorder.detectIOSStatic();
+        return /iPad|iPhone|iPod/.test(navigator.userAgent);
     }
 
-    /**
-     * 设置自定义关闭按钮逻辑 - 接管右上角的 'x' 按钮
-     * 优雅方案：实现双重事件监听机制，解决iOS触摸事件冲突
-     */
-    private setupCustomCloseButton(): void {
-        // 1. 获取真正的关闭按钮，如果不存在则退化到整个 modalEl
-        const closeButton = this.modalEl.querySelector<HTMLElement>('.modal-close-button') ?? this.modalEl;
-
-        // 2. 使用 Pointer Events 统一处理各种输入（mouse、touch、pen），避免 iOS 点击延迟
-        const pointerHandler = (e: PointerEvent) => {
-            // 只响应主按钮抬起事件，防止右键或辅助指针误触
-            if (e.button !== 0) return;
-
-            e.preventDefault();
-            e.stopPropagation();
-
-            console.log('[CLOSE] pointerup 触发，调用 requestClose');
-            this.requestClose();
-        };
-
-        // capture=true 保持与原逻辑一致；passive=false 以便阻止默认行为
-        closeButton.addEventListener('pointerup', pointerHandler, { capture: true, passive: false });
-
-        // 3. 记录移除器，保证 onClose 时清理
-        this._removeCloseListener = () => {
-            closeButton.removeEventListener('pointerup', pointerHandler, true);
-        };
-    }
 
     /**
      * iOS特定的UI优化
@@ -1343,44 +988,11 @@ export class RecordingModal extends Modal {
     }
 
     /**
-     * 紧急关闭方法 - 供外部调用，确保界面一定能关闭
+     * 紧急关闭方法 - 供外部调用
      */
     public emergencyClose(): void {
-        console.log('[EMERGENCY] 执行紧急关闭');
-        
-        // 重置所有状态标志
-        this.isClosing = false;
-        this.isDestroying = false;
-        this.hasNotifiedCancel = false;
-        this.closeCallCount = 0;
-        
-        // 设置为正常关闭，跳过所有确认
         this.closeReason = 'normal';
-        this.state = 'idle';
-        
-        // 强制销毁
-        this.forceDestroy();
+        this.close();
     }
 
-    /**
-     * 检查当前是否可以正常关闭（调试用）
-     */
-    public getCloseStatus(): {
-        canClose: boolean;
-        reason: string;
-        state: string;
-        closeReason: string;
-        isDestroying: boolean;
-        isClosing: boolean;
-    } {
-        const needsConfirm = this.shouldConfirmClose();
-        return {
-            canClose: !needsConfirm,
-            reason: needsConfirm ? '需要用户确认' : '可以直接关闭',
-            state: this.state,
-            closeReason: this.closeReason,
-            isDestroying: this.isDestroying,
-            isClosing: this.isClosing
-        };
-    }
 } 

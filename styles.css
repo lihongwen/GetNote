@@ -62,33 +62,30 @@
     color: #ef4444;
 }
 
-/* 基础样式重置 */
+/* 基础样式重置 - Obsidian标准化 */
 .recording-modal {
     max-width: 400px;
     margin: 0 auto;
-    border-radius: 12px;
-    overflow: hidden;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
 }
 
-/* 主容器 */
+/* 主容器 - 使用Obsidian标准样式 */
 .simple-recording-container {
     background: var(--background-primary);
-    padding: 32px 24px;
+    padding: var(--size-4-6) var(--size-4-4);
     text-align: center;
-    border-radius: 12px;
     min-height: 300px;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
+    border-radius: var(--radius-m);
 }
 
 /* 标题 */
 .simple-recording-title {
     font-size: 1.5em;
-    font-weight: 600;
+    font-weight: var(--font-semibold);
     color: var(--text-normal);
-    margin: 0 0 24px 0;
+    margin: 0 0 var(--size-4-6) 0;
 }
 
 /* 状态指示器 */
@@ -113,18 +110,18 @@
     color: var(--text-normal);
 }
 
-/* 状态样式 */
+/* 状态样式 - 使用Obsidian主题变量 */
 .status-idle .status-dot {
-    background: #9CA3AF;
+    background: var(--text-muted);
 }
 
 .status-recording .status-dot {
-    background: #EF4444;
+    background: var(--color-red);
     animation: pulse-simple 1.5s ease-in-out infinite;
 }
 
 .status-paused .status-dot {
-    background: #F59E0B;
+    background: var(--color-orange);
     animation: blink-simple 2s ease-in-out infinite;
 }
 
@@ -157,116 +154,118 @@
     51%, 100% { opacity: 0.7; }
 }
 
-/* 按钮组 */
+/* 按钮组 - 使用Obsidian标准间距 */
 .simple-buttons {
     display: flex;
-    gap: 12px;
+    gap: var(--size-4-2);
     justify-content: center;
-    margin: 28px 0 20px 0;
+    margin: var(--size-4-6) 0 var(--size-4-4) 0;
 }
 
 .simple-buttons button {
     flex: 1;
-    max-width: 110px;
+    max-width: 130px; /* 三个按钮可以更宽一些 */
     height: 44px;
     border: none;
-    border-radius: 8px;
-    font-size: 0.9em;
-    font-weight: 600;
+    border-radius: var(--button-radius);
+    font-size: var(--font-ui-small);
+    font-weight: var(--font-semibold);
     cursor: pointer;
     transition: all 0.2s ease;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 4px;
+    gap: var(--size-2-1);
     position: relative;
     overflow: hidden;
 }
 
-/* 开始按钮 */
+/* 开始按钮 - 使用Obsidian主题变量 */
 .start-btn {
-    background: #10B981;
-    color: white;
-    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+    box-shadow: var(--shadow-s);
 }
 
 .start-btn:hover:not(:disabled) {
-    background: #059669;
+    background: var(--interactive-accent-hover);
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+    box-shadow: var(--shadow-m);
 }
 
 .start-btn:disabled {
-    background: #9CA3AF;
-    color: #6B7280;
+    background: var(--background-modifier-border);
+    color: var(--text-muted);
     cursor: not-allowed;
     transform: none;
     box-shadow: none;
 }
 
-/* 暂停按钮 */
+/* 暂停按钮 - 使用Obsidian主题变量 */
 .pause-btn {
-    background: #F59E0B;
-    color: white;
-    box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
+    background: var(--color-orange);
+    color: var(--text-on-accent);
+    box-shadow: var(--shadow-s);
 }
 
 .pause-btn:hover:not(:disabled) {
-    background: #D97706;
+    background: var(--color-orange);
+    opacity: 0.8;
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(245, 158, 11, 0.4);
+    box-shadow: var(--shadow-m);
 }
 
 .pause-btn:disabled {
-    background: #9CA3AF;
-    color: #6B7280;
+    background: var(--background-modifier-border);
+    color: var(--text-muted);
     cursor: not-allowed;
     transform: none;
     box-shadow: none;
 }
 
-/* 停止按钮 */
+/* 停止按钮 - 使用Obsidian主题变量 */
 .stop-btn {
-    background: #EF4444;
-    color: white;
-    box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3);
+    background: var(--color-red);
+    color: var(--text-on-accent);
+    box-shadow: var(--shadow-s);
 }
 
 .stop-btn:hover:not(:disabled) {
-    background: #DC2626;
+    background: var(--color-red);
+    opacity: 0.8;
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
+    box-shadow: var(--shadow-m);
 }
 
 .stop-btn:disabled {
-    background: #9CA3AF;
-    color: #6B7280;
+    background: var(--background-modifier-border);
+    color: var(--text-muted);
     cursor: not-allowed;
     transform: none;
     box-shadow: none;
 }
 
-/* 取消按钮 */
+/* 取消按钮 - 使用Obsidian主题变量 */
 .cancel-btn {
-    background: #6B7280;
-    color: white;
-    box-shadow: 0 2px 8px rgba(107, 114, 128, 0.3);
-    border: 1px solid #4B5563;
+    background: var(--interactive-normal);
+    color: var(--text-normal);
+    box-shadow: var(--shadow-s);
+    border: 1px solid var(--background-modifier-border);
 }
 
 .cancel-btn:hover:not(:disabled) {
-    background: #4B5563;
+    background: var(--interactive-hover);
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(107, 114, 128, 0.4);
+    box-shadow: var(--shadow-m);
 }
 
 .cancel-btn:disabled {
-    background: #9CA3AF;
-    color: #6B7280;
+    background: var(--background-modifier-border);
+    color: var(--text-muted);
     cursor: not-allowed;
     transform: none;
     box-shadow: none;
-    border-color: #9CA3AF;
+    border-color: var(--background-modifier-border);
 }
 
 /* 按钮按下效果 */
@@ -306,14 +305,10 @@
     }
 }
 
-/* 深色主题支持 */
+/* 深色主题支持 - 简化，使用CSS变量自动适配 */
 .theme-dark .simple-recording-container {
     background: var(--background-primary);
     border: 1px solid var(--background-modifier-border);
-}
-
-.theme-dark .recording-modal {
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
 }
 
 /* 高对比度支持 */
@@ -398,16 +393,16 @@
     text-align: center;
 }
 
-/* 整合的图片区域 */
+/* 整合的图片区域 - 使用Obsidian标准样式 */
 .integrated-image-area {
     border: 2px dashed var(--background-modifier-border);
-    border-radius: 8px;
-    padding: 12px;
+    border-radius: var(--radius-m);
+    padding: var(--size-4-2);
     background: var(--background-secondary);
     transition: all 0.3s ease;
     display: flex;
     align-items: flex-start;
-    gap: 12px;
+    gap: var(--size-4-2);
     min-height: 80px;
 }
 
@@ -433,9 +428,9 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    font-size: 18px;
+    font-size: var(--font-ui-medium);
     line-height: 1;
-    transition: all 0.2s ease;
+    transition: all var(--anim-duration-fast) ease;
     position: relative;
 }
 
@@ -677,35 +672,35 @@
     background: rgba(239, 68, 68, 1);
 }
 
-/* 增强版删除按钮样式 */
+/* 增强版删除按钮样式 - 使用Obsidian主题变量 */
 .delete-button.enhanced-delete {
     position: absolute;
-    top: 4px;
-    right: 4px;
+    top: var(--size-2-1);
+    right: var(--size-2-1);
     width: 24px;
     height: 24px;
     border-radius: 50%;
-    border: 2px solid white;
-    background: #ff4757;
-    color: white;
+    border: 2px solid var(--background-primary);
+    background: var(--color-red);
+    color: var(--text-on-accent);
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 12px;
+    font-size: var(--font-ui-smaller);
     line-height: 1;
-    font-weight: bold;
+    font-weight: var(--font-bold);
     opacity: 0.9;
-    transition: all 0.2s ease;
+    transition: all var(--anim-duration-fast) ease;
     z-index: 10;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    box-shadow: var(--shadow-s);
 }
 
 .delete-button.enhanced-delete:hover {
-    background: #ff3742;
+    background: var(--color-red);
     opacity: 1;
     transform: scale(1.1);
-    box-shadow: 0 3px 6px rgba(0, 0, 0, 0.4);
+    box-shadow: var(--shadow-m);
 }
 
 .delete-button.enhanced-delete:active {
@@ -931,7 +926,7 @@
     color: white;
 }
 
-/* 移动端适配 */
+/* 通用移动端适配 */
 @media (max-width: 480px) {
     .image-upload-area {
         padding: 16px;
@@ -998,13 +993,13 @@
         margin-top: 6px;
     }
 
-    /* 手机端删除按钮优化 */
+    /* 手机端删除按钮优化 - 使用Obsidian标准尺寸 */
     .delete-button.enhanced-delete {
         width: 28px;
         height: 28px;
-        font-size: 14px;
-        top: 2px;
-        right: 2px;
+        font-size: var(--font-ui-small);
+        top: var(--size-2-1);
+        right: var(--size-2-1);
         border-width: 2px;
         /* 增加触摸目标大小 */
         touch-action: manipulation;
@@ -1013,7 +1008,8 @@
     
     /* 为手机端增加更明显的视觉反馈 */
     .delete-button.enhanced-delete:active {
-        background: #ff2733;
+        background: var(--color-red);
+        opacity: 0.8;
         transform: scale(0.9);
     }
     
@@ -1199,15 +1195,33 @@
     border-left: 3px solid var(--color-orange);
 }
 
-/* ===== iOS特定样式优化 ===== */
+/* ===== 移动端优化样式 ===== */
+.mobile-optimized .simple-buttons button {
+    min-height: 48px; /* 增大触摸区域 */
+    font-size: var(--font-ui-medium);
+    /* 移除触摸高亮 */
+    -webkit-tap-highlight-color: transparent;
+    /* 优化触摸反馈 */
+    touch-action: manipulation;
+}
+
+.mobile-optimized .simple-buttons button:active {
+    transform: scale(0.95);
+    opacity: 0.8;
+}
+
+/* iOS特定优化 */
 .ios-optimized .simple-time {
-    font-weight: 600;
+    font-weight: var(--font-semibold);
     font-size: 1.4rem;
 }
 
 .ios-optimized .simple-buttons button {
-    font-size: 0.95rem;
-    min-height: 48px; /* 增大触摸区域 */
+    /* iOS上的按钮最小高度 */
+    min-height: 48px;
+    /* 优化iOS触摸体验 */
+    -webkit-appearance: none;
+    -webkit-touch-callout: none;
 }
 
 .ios-hint {

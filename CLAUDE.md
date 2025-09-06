@@ -47,6 +47,7 @@ This is an Obsidian plugin project named "getnote-plugin" that creates rich mult
 - 🛡️ **Smart Cancellation**: State-aware confirmation dialogs prevent accidental data loss
 - 🔚 **Graceful Exit**: Clean resource cleanup and API cancellation on user abort
 - 🔒 **Wake Lock**: Prevents screen lock during long recording sessions
+- 🎮 **Enhanced System Integration**: Close commands accessible via Command Palette, hotkeys (Cmd/Ctrl+Escape), and dynamic ribbon icons
 
 ## Technical Requirements
 
@@ -157,6 +158,7 @@ main.ts                  # Plugin entry point, coordinates complete multimodal p
 7. **Wake Lock Integration**: Prevents screen lock during recording sessions for better user experience
 8. **Advanced Image Management**: Comprehensive validation, automatic filename deduplication, batch processing with error recovery
 9. **Robust Cancellation Logic**: Advanced cancellation handling with custom UI (including iOS support) to prevent data loss and UI freezes.
+10. **System Integration**: Multiple access methods including Command Palette integration, hotkey support (Cmd/Ctrl+Escape), and dynamic ribbon icons that appear/hide based on recording state.
 
 ### Multimodal Data Flow
 
@@ -178,6 +180,8 @@ main.ts                  # Plugin entry point, coordinates complete multimodal p
 - **Image Filename Uniqueness**: Auto-generates unique names with timestamps to prevent duplicates
 - **Mobile Touch Optimization**: Enhanced delete buttons with 28px touch targets for mobile devices
 - **Confirmation Dialogs**: State-aware confirmation prevents accidental data loss
+- **Enhanced Command Integration**: Dual close commands (graceful + emergency) with conditional availability and hotkey support
+- **Dynamic UI Elements**: Ribbon icons that automatically appear/hide based on recording modal state
 
 ## UI Design Features
 
