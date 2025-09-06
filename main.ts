@@ -3,7 +3,7 @@ import { AudioRecorder } from './src/recorder';
 import { DashScopeClient, OCRResult } from './src/api-client';
 import { NoteGenerator, NoteMetadata, ProcessedContent } from './src/note-generator';
 import { GetNoteSettings, DEFAULT_SETTINGS, GetNoteSettingTab } from './src/settings';
-import { RecordingModal } from './src/recording-modal';
+import { VIEW_TYPE_RECORDING, RecordingView } from './src/recording-view';
 import { TextProcessor, MultimodalProcessingResult } from './src/text-processor';
 import { ImageManager, ImageItem } from './src/image-manager';
 import { MultimodalContent, MultimodalMetadata } from './src/types';
@@ -12,9 +12,7 @@ export default class GetNotePlugin extends Plugin {
 	settings: GetNoteSettings;
 	private dashScopeClient: DashScopeClient | null = null;
 	private noteGenerator: NoteGenerator;
-	private recordingModal: RecordingModal | null = null;
 	private textProcessor: TextProcessor | null = null;
-	private closeRibbonIcon: HTMLElement | null = null;
 	
 	// 取消状态管理
 	private isProcessingCancelled: boolean = false;
@@ -32,42 +30,45 @@ export default class GetNotePlugin extends Plugin {
 			return;
 		}
 
-		// 添加录音按钮到工具栏
-		this.addRibbonIcon('microphone', '打开录音界面', (evt: MouseEvent) => {
-			this.openRecordingModal();
-		});
+		// 注册录音视图
+		this.registerView(VIEW_TYPE_RECORDING, (leaf) => 
+			new RecordingView(
+				leaf, 
+				this,
+				(audioBlob: Blob, images?: ImageItem[]) => this.handleMultimodalData(audioBlob, images),
+				(error: Error) => this.handleRecordingError(error),
+				this.settings.enableLLMProcessing,
+				this.settings.enableImageOCR,
+				() => this.handleRecordingCancel(),
+				this.settings.enableWakeLock
+			)
+		);
 
-		// 添加关闭录音界面按钮到工具栏（仅在录音界面开启时显示）
-		const closeRibbonIcon = this.addRibbonIcon('square', '关闭录音界面', (evt: MouseEvent) => {
-			this.closeRecordingGracefully();
+		// 添加录音按钮到工具栏
+		this.addRibbonIcon('microphone', '打开录音界面', () => {
+			this.openRecordingView();
 		});
-		
-		// 初始状态下隐藏关闭按钮
-		closeRibbonIcon.style.display = 'none';
-		
-		// 保存关闭按钮引用用于动态显示/隐藏
-		this.closeRibbonIcon = closeRibbonIcon;
 
 		// 添加命令
 		this.addCommand({
-			id: 'open-recording-modal',
-			name: '打开录音界面',
+			id: 'open-recording-view',
+			name: 'GetNote: 打开录音界面',
 			callback: () => {
-				this.openRecordingModal();
+				this.openRecordingView();
 			}
 		});
 
-		// 添加关闭录音界面命令 - 优化为在系统菜单中显示
+		// 添加关闭录音界面命令
 		this.addCommand({
-			id: 'close-recording',
+			id: 'close-recording-view',
 			name: 'GetNote: 关闭录音界面',
 			hotkeys: [{ modifiers: ["Mod"], key: "Escape" }],
 			checkCallback: (checking: boolean) => {
-				// 只在有活跃录音界面时显示此命令
-				const hasActiveRecording = this.recordingModal !== null;
-				if (hasActiveRecording) {
+				// 检查是否有活跃的录音视图
+				const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_RECORDING);
+				if (leaves.length > 0) {
 					if (!checking) {
-						this.closeRecordingGracefully();
+						leaves[0].detach();
 					}
 					return true;
 				}
@@ -89,73 +90,67 @@ export default class GetNotePlugin extends Plugin {
 	}
 
 	onunload() {
-		// 设置取消标志并清理录音Modal
+		// 设置取消标志并清理录音视图
 		this.isProcessingCancelled = true;
-		if (this.recordingModal) {
-			this.recordingModal.close();
-			this.recordingModal = null;
-		}
-		// 清理ribbon icon引用
-		this.hideCloseRibbonIcon();
-		this.closeRibbonIcon = null;
+		const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_RECORDING);
+		leaves.forEach(leaf => leaf.detach());
 	}
 
 	/**
-	 * 显示关闭录音界面按钮
+	 * 打开录音视图
 	 */
-	private showCloseRibbonIcon(): void {
-		if (this.closeRibbonIcon) {
-			this.closeRibbonIcon.style.display = '';
+	private openRecordingView(): void {
+		// 检查API配置
+		if (!this.settings.apiKey) {
+			new Notice('请先在设置中配置API Key');
+			return;
 		}
+
+		if (!this.dashScopeClient) {
+			new Notice('API客户端未初始化，请检查设置');
+			return;
+		}
+
+		// 重置取消状态（开始新录音时）
+		this.isProcessingCancelled = false;
+
+		// 检查是否已有录音视图
+		const existingLeaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_RECORDING);
+		if (existingLeaves.length > 0) {
+			// 激活现有视图
+			this.app.workspace.revealLeaf(existingLeaves[0]);
+			return;
+		}
+
+		// 创建新的录音视图
+		const leaf = this.app.workspace.getRightLeaf(false);
+		leaf.setViewState({
+			type: VIEW_TYPE_RECORDING,
+			active: true
+		});
 	}
 
 	/**
-	 * 隐藏关闭录音界面按钮
-	 */
-	private hideCloseRibbonIcon(): void {
-		if (this.closeRibbonIcon) {
-			this.closeRibbonIcon.style.display = 'none';
-		}
-	}
-
-	/**
-	 * 优雅关闭录音界面 - 主要的关闭方法
-	 */
-	private closeRecordingGracefully(): void {
-		console.log('[CLOSE] 执行优雅关闭录音界面');
-		
-		if (this.recordingModal) {
-			try {
-				// 使用Modal的正常关闭方法，这会触发确认对话框
-				this.recordingModal.close();
-				new Notice('正在关闭录音界面...');
-			} catch (error) {
-				console.error('[CLOSE] 优雅关闭失败，尝试紧急关闭:', error);
-				// 如果优雅关闭失败，回退到紧急关闭
-				this.emergencyCloseRecording();
-			}
-		} else {
-			new Notice('没有活跃的录音界面需要关闭');
-		}
-	}
-
-	/**
-	 * 紧急关闭录音界面 - 用于iPhone调试和故障恢复
+	 * 紧急关闭录音界面 - 用于调试和故障恢复
 	 */
 	private emergencyCloseRecording(): void {
 		console.log('[EMERGENCY] 执行紧急关闭录音界面');
 		
-		if (this.recordingModal) {
+		const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_RECORDING);
+		if (leaves.length > 0) {
 			try {
-				// 使用Modal的紧急关闭方法
-				this.recordingModal.emergencyClose();
+				leaves.forEach(leaf => {
+					const view = leaf.view as RecordingView;
+					if (view && typeof view.emergencyClose === 'function') {
+						view.emergencyClose();
+					} else {
+						leaf.detach();
+					}
+				});
 				new Notice('已强制关闭录音界面');
 			} catch (error) {
 				console.error('[EMERGENCY] 紧急关闭失败:', error);
 				new Notice('紧急关闭失败，请刷新页面');
-			} finally {
-				this.recordingModal = null;
-				this.hideCloseRibbonIcon();
 			}
 		} else {
 			new Notice('没有找到活跃的录音界面');
@@ -163,19 +158,6 @@ export default class GetNotePlugin extends Plugin {
 		
 		// 重置处理状态
 		this.isProcessingCancelled = true;
-		
-		// 额外安全措施：移除所有可能的Modal覆盖层
-		try {
-			const overlays = document.querySelectorAll('.modal, [style*="z-index: 10000"]');
-			overlays.forEach((overlay, index) => {
-				if (overlay.parentNode) {
-					console.log(`[EMERGENCY] 移除覆盖层 ${index + 1}:`, overlay);
-					overlay.parentNode.removeChild(overlay);
-				}
-			});
-		} catch (error) {
-			console.error('[EMERGENCY] 清理覆盖层时出错:', error);
-		}
 	}
 
 	async loadSettings() {
@@ -199,37 +181,6 @@ export default class GetNotePlugin extends Plugin {
 				maxRetries: this.settings.maxRetries
 			});
 		}
-	}
-
-	private openRecordingModal() {
-		// 检查API配置
-		if (!this.settings.apiKey) {
-			new Notice('请先在设置中配置API Key');
-			return;
-		}
-
-		if (!this.dashScopeClient) {
-			new Notice('API客户端未初始化，请检查设置');
-			return;
-		}
-
-		// 重置取消状态（开始新录音时）
-		this.isProcessingCancelled = false;
-
-		// 创建并打开录音Modal
-		this.recordingModal = new RecordingModal(
-			this.app,
-			(audioBlob, images) => this.handleMultimodalData(audioBlob, images),
-			(error) => this.handleRecordingError(error),
-			this.settings.enableLLMProcessing,
-			this.settings.enableImageOCR,
-			() => this.handleRecordingCancel()
-		);
-		
-		this.recordingModal.open();
-		
-		// 显示关闭按钮
-		this.showCloseRibbonIcon();
 	}
 
 	private async handleMultimodalData(audioBlob: Blob, images?: ImageItem[]) {
@@ -261,8 +212,12 @@ export default class GetNotePlugin extends Plugin {
 			if (this.settings.keepOriginalAudio && hasAudio) {
 				try {
 					// 更新界面状态
-					if (this.recordingModal) {
-						this.recordingModal.updateProcessingState('saving-audio');
+					const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_RECORDING);
+					if (leaves.length > 0) {
+						const view = leaves[0].view;
+						if (view instanceof RecordingView) {
+							view.updateProcessingState('saving-audio');
+						}
 					}
 					
 					new Notice('正在保存音频文件...');
@@ -294,8 +249,11 @@ export default class GetNotePlugin extends Plugin {
 			// 阶段1：语音转文字
 			let transcribedText = '';
 			if (hasAudio) {
-				if (this.recordingModal) {
-					this.recordingModal.updateProcessingState('transcribing');
+				if (this.app.workspace.getLeavesOfType(VIEW_TYPE_RECORDING).length > 0) {
+					const view = this.app.workspace.getLeavesOfType(VIEW_TYPE_RECORDING)[0].view as RecordingView;
+					if (view) {
+						view.updateProcessingState('transcribing');
+					}
 				}
 				
 				new Notice('正在调用AI转录音频...');
@@ -313,8 +271,11 @@ export default class GetNotePlugin extends Plugin {
 			let ocrResults: Map<string, OCRResult> = new Map();
 			let totalOCRText = '';
 			if (hasImages && this.settings.enableImageOCR) {
-				if (this.recordingModal) {
-					this.recordingModal.updateProcessingState('ocr-processing');
+				if (this.app.workspace.getLeavesOfType(VIEW_TYPE_RECORDING).length > 0) {
+					const view = this.app.workspace.getLeavesOfType(VIEW_TYPE_RECORDING)[0].view as RecordingView;
+					if (view) {
+						view.updateProcessingState('ocr-processing');
+					}
 				}
 				
 				new Notice(`正在识别${images.length}张图片中的文字...`);
@@ -383,8 +344,11 @@ export default class GetNotePlugin extends Plugin {
 			
 			if ((this.settings.enableLLMProcessing || (hasImages && this.settings.combineAudioAndOCR)) && this.textProcessor) {
 				// 更新界面状态
-				if (this.recordingModal) {
-					this.recordingModal.updateProcessingState('processing');
+				if (this.app.workspace.getLeavesOfType(VIEW_TYPE_RECORDING).length > 0) {
+					const view = this.app.workspace.getLeavesOfType(VIEW_TYPE_RECORDING)[0].view as RecordingView;
+					if (view) {
+						view.updateProcessingState('processing');
+					}
 				}
 				
 				new Notice('正在使用AI处理多模态内容...');
@@ -436,8 +400,11 @@ export default class GetNotePlugin extends Plugin {
 			}
 
 			// 阶段5：保存笔记
-			if (this.recordingModal) {
-				this.recordingModal.updateProcessingState('saving');
+			if (this.app.workspace.getLeavesOfType(VIEW_TYPE_RECORDING).length > 0) {
+				const view = this.app.workspace.getLeavesOfType(VIEW_TYPE_RECORDING)[0].view as RecordingView;
+				if (view) {
+					view.updateProcessingState('saving');
+				}
 			}
 			
 			// 最后检查是否被取消
@@ -507,8 +474,7 @@ export default class GetNotePlugin extends Plugin {
 			}
 			
 			// 清理录音Modal引用（正常完成）
-			this.recordingModal = null;
-			this.hideCloseRibbonIcon();
+			// The recording view handles its own state, so no explicit cleanup here
 
 		} catch (error) {
 			console.error('处理多模态内容时出错:', error);
@@ -518,19 +484,7 @@ export default class GetNotePlugin extends Plugin {
 			this.isProcessingCancelled = true;
 			
 			// 安全清理录音Modal引用和状态
-			if (this.recordingModal) {
-				try {
-					this.recordingModal.close();
-				} catch (modalError) {
-					console.error('错误处理期间关闭Modal失败:', modalError);
-				} finally {
-					this.recordingModal = null;
-					this.hideCloseRibbonIcon();
-				}
-			} else {
-				this.recordingModal = null;
-				this.hideCloseRibbonIcon();
-			}
+			// The recording view handles its own state, so no explicit cleanup here
 		}
 	}
 
@@ -542,21 +496,7 @@ export default class GetNotePlugin extends Plugin {
 		this.isProcessingCancelled = true;
 		
 		// 安全清理录音Modal引用
-		if (this.recordingModal) {
-			try {
-				// 尝试正常关闭Modal
-				this.recordingModal.close();
-			} catch (modalError) {
-				console.error('关闭Modal时出错:', modalError);
-				// 强制清理引用，防止悬挂状态
-			} finally {
-				this.recordingModal = null;
-				this.hideCloseRibbonIcon();
-			}
-		} else {
-			this.recordingModal = null;
-			this.hideCloseRibbonIcon();
-		}
+		// The recording view handles its own state, so no explicit cleanup here
 	}
 
 	private handleRecordingCancel() {
@@ -571,10 +511,7 @@ export default class GetNotePlugin extends Plugin {
 		new Notice('录音已取消');
 		
 		// 清理Modal引用
-		if (this.recordingModal) {
-			this.recordingModal = null;
-			this.hideCloseRibbonIcon();
-		}
+		// The recording view handles its own state, so no explicit cleanup here
 	}
 
 	/**

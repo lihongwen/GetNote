@@ -2912,7 +2912,7 @@ var GetNoteSettingTab = class extends import_obsidian2.PluginSettingTab {
   }
 };
 
-// src/recording-modal.ts
+// src/recording-view.ts
 var import_obsidian3 = require("obsidian");
 init_recorder();
 
@@ -3547,32 +3547,21 @@ var ImageManager = class {
   }
 };
 
-// src/recording-modal.ts
-var RecordingModal = class extends import_obsidian3.Modal {
-  constructor(app, onRecordingComplete, onError, enableLLMProcessing = false, enableImageOCR = false, onCancel, enableWakeLock = true) {
-    super(app);
+// src/recording-view.ts
+var VIEW_TYPE_RECORDING = "getnote-recording-view";
+var RecordingView = class extends import_obsidian3.ItemView {
+  constructor(leaf, plugin, onRecordingComplete, onError, enableLLMProcessing = false, enableImageOCR = false, onCancel, enableWakeLock = true) {
+    super(leaf);
     this.audioRecorder = null;
     this.state = "idle";
     this.timerInterval = null;
-    this.closeReason = "manual";
-    // 新增取消回调
     // Processing state
     this.enableLLMProcessing = false;
     this.enableImageOCR = false;
     this.enableWakeLock = true;
-    // 图片组件状态
-    this.imageState = {
-      images: [],
-      selectedImages: /* @__PURE__ */ new Set(),
-      dragActive: false,
-      uploadProgress: /* @__PURE__ */ new Map(),
-      ocrProgress: null,
-      showPreview: false,
-      previewImageId: null
-    };
-    // Cancel confirmation and protection mechanism
-    // 简化的关闭状态管理
-    this.isProcessingClose = false;
+    // 图片状态
+    this.images = [];
+    this.plugin = plugin;
     this.onRecordingComplete = onRecordingComplete;
     this.onError = onError;
     this.enableLLMProcessing = enableLLMProcessing;
@@ -3581,11 +3570,20 @@ var RecordingModal = class extends import_obsidian3.Modal {
     this.enableWakeLock = enableWakeLock;
     this.imageManager = new ImageManager();
   }
-  onOpen() {
-    const { contentEl } = this;
-    contentEl.empty();
-    contentEl.addClass("recording-modal");
-    const container = contentEl.createDiv("simple-recording-container");
+  getViewType() {
+    return VIEW_TYPE_RECORDING;
+  }
+  getDisplayText() {
+    return "\u8BED\u97F3\u5F55\u5236";
+  }
+  getIcon() {
+    return "microphone";
+  }
+  async onOpen() {
+    const root = this.containerEl.children[1];
+    root.empty();
+    root.addClass("recording-modal");
+    const container = root.createDiv("simple-recording-container");
     const title = container.createEl("h2", { text: "\u8BED\u97F3\u5F55\u5236" });
     title.addClass("simple-recording-title");
     this.statusContainer = container.createDiv("simple-status");
@@ -3595,12 +3593,6 @@ var RecordingModal = class extends import_obsidian3.Modal {
     this.statusText.addClass("status-text");
     this.timeDisplay = container.createEl("div", { text: "00:00" });
     this.timeDisplay.addClass("simple-time");
-    this.wakeLockIndicator = container.createDiv("wake-lock-indicator");
-    this.wakeLockIndicator.addClass("hidden");
-    const wakeLockIcon = this.wakeLockIndicator.createDiv("wake-lock-icon");
-    wakeLockIcon.setText("\u{1F512}");
-    this.wakeLockText = this.wakeLockIndicator.createEl("span", { text: "\u9632\u9501\u5C4F\u5DF2\u6FC0\u6D3B" });
-    this.wakeLockText.addClass("wake-lock-text");
     const buttonGroup = container.createDiv("simple-buttons");
     const startButtonEl = buttonGroup.createEl("button");
     startButtonEl.addClass("start-btn");
@@ -3614,632 +3606,182 @@ var RecordingModal = class extends import_obsidian3.Modal {
     const hintText = this.enableLLMProcessing ? "\u70B9\u51FB\u5F00\u59CB\u5F55\u97F3\uFF0C\u5B8C\u6210\u540E\u5C06\u8FDB\u884CAI\u8F6C\u5F55\u548C\u6587\u672C\u4F18\u5316" : "\u70B9\u51FB\u5F00\u59CB\u5F55\u97F3\uFF0C\u5F55\u97F3\u5B8C\u6210\u540E\u5C06\u81EA\u52A8\u8F6C\u6362\u4E3A\u6587\u5B57\u7B14\u8BB0";
     this.hintText = container.createEl("div", { text: hintText });
     this.hintText.addClass("simple-hint");
-    if (this.enableImageOCR) {
-      this.createImageSection(container);
-    }
-    this.optimizeForIOS();
     this.updateUI();
   }
-  /**
-   * 打开插件设置
-   */
-  openPluginSettings() {
-    this.closeReason = "normal";
-    this.close();
-    setTimeout(() => {
-      var _a, _b;
-      (_a = this.app.setting) == null ? void 0 : _a.open();
-      (_b = this.app.setting) == null ? void 0 : _b.openTabById("getnote-plugin");
-    }, 100);
+  async onClose() {
+    this.performCleanup();
   }
-  /**
-   * 简化的关闭请求处理
-   */
-  requestClose() {
-    if (this.isProcessingClose) {
-      return;
-    }
-    if (this.shouldConfirmClose()) {
-      this.showSimpleConfirmation();
-    } else {
-      this.close();
-    }
-  }
-  onClose() {
-    if (this.isProcessingClose) {
-      return;
-    }
-    this.isProcessingClose = true;
-    try {
-      this.performCleanup();
-      if (this.closeReason === "cancelled" && this.onCancel) {
-        this.onCancel();
-      }
-    } catch (error) {
-      console.error("Modal \u6E85\u7406\u65F6\u51FA\u9519:", error);
-    }
-  }
-  /**
-   * 简化的关闭确认检查
-   */
-  shouldConfirmClose() {
-    if (this.state === "idle" || this.closeReason === "normal") {
-      return false;
-    }
-    const needsConfirm = [
-      "recording",
-      "paused",
-      "saving-audio",
-      "transcribing",
-      "ocr-processing",
-      "processing",
-      "saving"
-    ].includes(this.state);
-    return needsConfirm;
-  }
-  /**
-   * 显示简化的确认对话框
-   */
-  showSimpleConfirmation() {
-    const message = this.getConfirmationMessage();
-    if (confirm(message)) {
-      this.close();
-    } else {
-      this.closeReason = "manual";
-    }
-  }
-  /**
-   * 根据当前状态获取确认消息
-   */
-  getConfirmationMessage() {
-    switch (this.state) {
-      case "recording":
-      case "paused":
-        return "\u786E\u5B9A\u8981\u53D6\u6D88\u5F55\u97F3\u5417\uFF1F\n\n\u5F55\u97F3\u5185\u5BB9\u5C06\u4F1A\u4E22\u5931\uFF0C\u65E0\u6CD5\u6062\u590D\u3002";
-      case "saving-audio":
-        return "\u6B63\u5728\u4FDD\u5B58\u97F3\u9891\u6587\u4EF6\uFF0C\u786E\u5B9A\u8981\u53D6\u6D88\u5417\uFF1F\n\n\u5F55\u97F3\u548C\u97F3\u9891\u6587\u4EF6\u5C06\u4F1A\u4E22\u5931\u3002";
-      case "transcribing":
-        return "\u6B63\u5728\u8F6C\u5F55\u97F3\u9891\uFF0C\u786E\u5B9A\u8981\u53D6\u6D88\u5417\uFF1F\n\n\u5DF2\u5F55\u5236\u7684\u5185\u5BB9\u5C06\u4F1A\u4E22\u5931\u3002";
-      case "processing":
-        return "\u6B63\u5728\u5904\u7406\u5F55\u97F3\uFF0C\u786E\u5B9A\u8981\u53D6\u6D88\u5417\uFF1F\n\n\u5DF2\u5F55\u5236\u548C\u8F6C\u5F55\u7684\u5185\u5BB9\u5C06\u4F1A\u4E22\u5931\u3002";
-      case "saving":
-        return "\u6B63\u5728\u4FDD\u5B58\u7B14\u8BB0\uFF0C\u786E\u5B9A\u8981\u53D6\u6D88\u5417\uFF1F\n\n\u5904\u7406\u5B8C\u6210\u7684\u5185\u5BB9\u53EF\u80FD\u4F1A\u4E22\u5931\u3002";
-      default:
-        return "\u786E\u5B9A\u8981\u5173\u95ED\u5F55\u97F3\u754C\u9762\u5417\uFF1F";
-    }
-  }
-  /**
-   * 执行资源清理
-   */
   performCleanup() {
+    if (this.audioRecorder) {
+      this.audioRecorder.stopRecording();
+      this.audioRecorder = null;
+    }
     if (this.timerInterval) {
       clearInterval(this.timerInterval);
       this.timerInterval = null;
     }
-    if (this.audioRecorder && this.audioRecorder.getRecordingState()) {
-      this.audioRecorder.stopRecording();
-    }
-    this.audioRecorder = null;
-    if (this.imageManager) {
-      console.log("\u6E05\u7406\u56FE\u7247\u8D44\u6E90...");
-      this.imageManager.clearAllImages();
-    }
-    this.imageState = {
-      images: [],
-      selectedImages: /* @__PURE__ */ new Set(),
-      dragActive: false,
-      uploadProgress: /* @__PURE__ */ new Map(),
-      ocrProgress: null,
-      showPreview: false,
-      previewImageId: null
-    };
-    this.state = "idle";
-    this.closeReason = "manual";
+    this.images.forEach((image) => {
+      if (image.thumbnailDataUrl && image.thumbnailDataUrl.startsWith("blob:")) {
+        URL.revokeObjectURL(image.thumbnailDataUrl);
+      }
+      if (image.originalDataUrl && image.originalDataUrl.startsWith("blob:")) {
+        URL.revokeObjectURL(image.originalDataUrl);
+      }
+    });
+    this.images = [];
   }
   async handleStart() {
-    var _a;
     try {
-      if (this.state === "paused") {
-        (_a = this.audioRecorder) == null ? void 0 : _a.resumeRecording();
-        this.setState("recording");
-        new import_obsidian3.Notice("\u7EE7\u7EED\u5F55\u97F3...");
-      } else {
-        const isIOS = this.detectIOS();
-        if (isIOS) {
-          const iosStatus = await AudioRecorder.checkIOSMicrophoneStatus();
-          if (!iosStatus.supported) {
-            throw new Error(`\u5F55\u97F3\u529F\u80FD\u4E0D\u53D7\u652F\u6301: ${iosStatus.error}`);
-          }
-          if (!iosStatus.hasPermission && iosStatus.error) {
-            throw new Error(`\u9EA6\u514B\u98CE\u6743\u9650\u95EE\u9898: ${iosStatus.error}`);
-          }
-        }
-        this.setState("recording");
-        const hasPermission = await AudioRecorder.checkMicrophonePermission();
-        if (!hasPermission) {
-          throw new Error("\u9700\u8981\u9EA6\u514B\u98CE\u6743\u9650\u624D\u80FD\u5F55\u97F3\u3002\u8BF7\u5728\u6D4F\u89C8\u5668\u8BBE\u7F6E\u4E2D\u5141\u8BB8\u9EA6\u514B\u98CE\u8BBF\u95EE\u3002");
-        }
+      if (this.state === "idle") {
         this.audioRecorder = new AudioRecorder(
-          (audioBlob) => this.handleRecordingComplete(audioBlob),
-          (error) => this.handleRecordingError(error),
+          (blob) => {
+          },
+          (error) => this.onError(error),
           {
-            enableWakeLock: this.enableWakeLock,
-            // 使用设置中的配置
-            onWakeLockChange: (isActive, error) => this.handleWakeLockChange(isActive, error)
+            enableWakeLock: this.enableWakeLock
           }
         );
         await this.audioRecorder.startRecording();
+        this.setRecordingState("recording");
         this.startTimer();
-        const message = isIOS ? "\u5F55\u97F3\u5DF2\u5F00\u59CB\uFF08iOS\u8BBE\u5907\u8BF7\u4FDD\u6301\u9875\u9762\u6D3B\u8DC3\uFF09" : "\u5F00\u59CB\u5F55\u97F3...";
-        new import_obsidian3.Notice(message);
+        new import_obsidian3.Notice("\u5F00\u59CB\u5F55\u97F3...");
+      } else if (this.state === "paused") {
+        if (this.audioRecorder) {
+          await this.audioRecorder.resumeRecording();
+          this.setRecordingState("recording");
+          this.startTimer();
+          new import_obsidian3.Notice("\u7EE7\u7EED\u5F55\u97F3...");
+        }
       }
     } catch (error) {
-      this.setState("idle");
-      const errorMsg = error instanceof Error ? error.message : "\u5F55\u97F3\u542F\u52A8\u5931\u8D25";
-      if (this.detectIOS() && errorMsg.includes("NotAllowedError")) {
-        this.onError(new Error("\u9EA6\u514B\u98CE\u6743\u9650\u88AB\u62D2\u7EDD\u3002\u8BF7\u5728Safari\u8BBE\u7F6E\u4E2D\u5141\u8BB8\u6B64\u7F51\u7AD9\u8BBF\u95EE\u9EA6\u514B\u98CE\uFF0C\u7136\u540E\u91CD\u65B0\u5C1D\u8BD5\u3002"));
-      } else {
-        this.onError(new Error(errorMsg));
-      }
-    }
-  }
-  handlePause() {
-    if (!this.audioRecorder)
-      return;
-    this.audioRecorder.pauseRecording();
-    this.setState("paused");
-    new import_obsidian3.Notice("\u5F55\u97F3\u5DF2\u6682\u505C");
-  }
-  async handleStop() {
-    if (this.audioRecorder && this.audioRecorder.getRecordingState()) {
-      this.audioRecorder.stopRecording();
-    }
-  }
-  async handleRecordingComplete(audioBlob) {
-    try {
-      if (this.timerInterval) {
-        clearInterval(this.timerInterval);
-        this.timerInterval = null;
-      }
-      this.closeReason = "normal";
-      const images = this.getImages();
-      await this.onRecordingComplete(audioBlob, images.length > 0 ? images : void 0);
-      this.close();
-    } catch (error) {
-      this.setState("idle");
+      console.error("\u5F00\u59CB\u5F55\u97F3\u5931\u8D25:", error);
       this.onError(error);
     }
   }
-  handleRecordingError(error) {
-    this.setState("idle");
-    this.onError(error);
+  async handlePause() {
+    try {
+      if (this.state === "recording" && this.audioRecorder) {
+        await this.audioRecorder.pauseRecording();
+        this.setRecordingState("paused");
+        this.stopTimer();
+        new import_obsidian3.Notice("\u5F55\u97F3\u5DF2\u6682\u505C");
+      }
+    } catch (error) {
+      console.error("\u6682\u505C\u5F55\u97F3\u5931\u8D25:", error);
+      this.onError(error);
+    }
   }
-  setState(newState) {
+  async handleStop() {
+    try {
+      if (this.audioRecorder && (this.state === "recording" || this.state === "paused")) {
+        const originalRecorder = this.audioRecorder;
+        originalRecorder.stopRecording();
+        setTimeout(async () => {
+          await this.onRecordingComplete(new Blob(), this.images.length > 0 ? this.images : void 0);
+        }, 100);
+        this.setRecordingState("idle");
+        this.stopTimer();
+        this.resetUI();
+        new import_obsidian3.Notice("\u5F55\u97F3\u5B8C\u6210");
+      }
+    } catch (error) {
+      console.error("\u505C\u6B62\u5F55\u97F3\u5931\u8D25:", error);
+      this.onError(error);
+    }
+  }
+  setRecordingState(newState) {
     this.state = newState;
     this.updateUI();
   }
   updateUI() {
-    this.statusContainer.removeClass("status-idle", "status-recording", "status-paused");
-    this.timeDisplay.removeClass("recording");
     switch (this.state) {
       case "idle":
-        this.statusContainer.addClass("status-idle");
+        this.startButton.setButtonText("\u{1F3A4} \u5F00\u59CB\u5F55\u97F3").setDisabled(false);
+        this.pauseButton.setButtonText("\u23F8\uFE0F \u6682\u505C").setDisabled(true);
+        this.stopButton.setButtonText("\u23F9\uFE0F \u505C\u6B62").setDisabled(true);
         this.statusText.textContent = "\u51C6\u5907\u5F55\u97F3";
-        this.hintText.textContent = this.enableLLMProcessing ? "\u70B9\u51FB\u5F00\u59CB\u5F55\u97F3\uFF0C\u5B8C\u6210\u540E\u5C06\u8FDB\u884CAI\u8F6C\u5F55\u548C\u6587\u672C\u4F18\u5316" : "\u70B9\u51FB\u5F00\u59CB\u5F55\u97F3\uFF0C\u5F55\u97F3\u5B8C\u6210\u540E\u5C06\u81EA\u52A8\u8F6C\u6362\u4E3A\u6587\u5B57\u7B14\u8BB0";
-        this.startButton.setDisabled(false).setButtonText("\u5F00\u59CB\u5F55\u97F3");
-        this.pauseButton.setDisabled(true);
-        this.stopButton.setDisabled(true);
+        this.statusContainer.className = "simple-status status-idle";
+        this.timeDisplay.removeClass("recording");
         break;
       case "recording":
-        this.statusContainer.addClass("status-recording");
+        this.startButton.setButtonText("\u{1F3A4} \u5F55\u97F3\u4E2D").setDisabled(true);
+        this.pauseButton.setButtonText("\u23F8\uFE0F \u6682\u505C").setDisabled(false);
+        this.stopButton.setButtonText("\u23F9\uFE0F \u505C\u6B62").setDisabled(false);
         this.statusText.textContent = "\u6B63\u5728\u5F55\u97F3...";
+        this.statusContainer.className = "simple-status status-recording";
         this.timeDisplay.addClass("recording");
-        this.hintText.textContent = "\u6B63\u5728\u5F55\u97F3\u4E2D\uFF0C\u53EF\u4EE5\u6682\u505C\u6216\u505C\u6B62\u5F55\u97F3";
-        this.startButton.setDisabled(true);
-        this.pauseButton.setDisabled(false);
-        this.stopButton.setDisabled(false);
         break;
       case "paused":
-        this.statusContainer.addClass("status-paused");
+        this.startButton.setButtonText("\u25B6\uFE0F \u7EE7\u7EED\u5F55\u97F3").setDisabled(false);
+        this.pauseButton.setButtonText("\u23F8\uFE0F \u5DF2\u6682\u505C").setDisabled(true);
+        this.stopButton.setButtonText("\u23F9\uFE0F \u505C\u6B62").setDisabled(false);
         this.statusText.textContent = "\u5F55\u97F3\u5DF2\u6682\u505C";
+        this.statusContainer.className = "simple-status status-paused";
         this.timeDisplay.removeClass("recording");
-        this.hintText.textContent = "\u5F55\u97F3\u5DF2\u6682\u505C\uFF0C\u53EF\u4EE5\u7EE7\u7EED\u5F55\u97F3\u6216\u505C\u6B62\u5F55\u97F3";
-        this.startButton.setDisabled(false).setButtonText("\u7EE7\u7EED\u5F55\u97F3");
-        this.pauseButton.setDisabled(true);
-        this.stopButton.setDisabled(false);
         break;
-      case "saving-audio":
-        this.statusContainer.addClass("status-recording");
-        this.statusText.textContent = "\u4FDD\u5B58\u97F3\u9891...";
-        this.timeDisplay.removeClass("recording");
-        this.hintText.textContent = "\u6B63\u5728\u4FDD\u5B58\u97F3\u9891\u6587\u4EF6\uFF0C\u8BF7\u7A0D\u5019...";
-        this.startButton.setDisabled(true);
-        this.pauseButton.setDisabled(true);
-        this.stopButton.setDisabled(true);
-        break;
-      case "transcribing":
-        this.statusContainer.addClass("status-recording");
-        this.statusText.textContent = "\u6B63\u5728\u8F6C\u5F55...";
-        this.timeDisplay.removeClass("recording");
-        this.hintText.textContent = "\u6B63\u5728\u5C06\u8BED\u97F3\u8F6C\u6362\u4E3A\u6587\u5B57\uFF0C\u8BF7\u7A0D\u5019...";
-        this.startButton.setDisabled(true);
-        this.pauseButton.setDisabled(true);
-        this.stopButton.setDisabled(true);
-        break;
-      case "ocr-processing":
-        this.statusContainer.addClass("status-recording");
-        this.statusText.textContent = "\u56FE\u7247\u8BC6\u522B\u4E2D...";
-        this.timeDisplay.removeClass("recording");
-        this.hintText.textContent = "\u6B63\u5728\u8BC6\u522B\u56FE\u7247\u4E2D\u7684\u6587\u5B57\u5185\u5BB9\uFF0C\u8BF7\u7A0D\u5019...";
-        this.startButton.setDisabled(true);
-        this.pauseButton.setDisabled(true);
-        this.stopButton.setDisabled(true);
-        break;
-      case "processing":
-        this.statusContainer.addClass("status-recording");
-        this.statusText.textContent = "AI\u5904\u7406\u4E2D...";
-        this.timeDisplay.removeClass("recording");
-        this.hintText.textContent = "\u6B63\u5728\u4F7F\u7528AI\u4F18\u5316\u6587\u672C\u5185\u5BB9\u548C\u751F\u6210\u6807\u7B7E\uFF0C\u8BF7\u7A0D\u5019...";
-        this.startButton.setDisabled(true);
-        this.pauseButton.setDisabled(true);
-        this.stopButton.setDisabled(true);
-        break;
-      case "saving":
-        this.statusContainer.addClass("status-recording");
-        this.statusText.textContent = "\u4FDD\u5B58\u4E2D...";
-        this.timeDisplay.removeClass("recording");
-        this.hintText.textContent = "\u6B63\u5728\u4FDD\u5B58\u7B14\u8BB0\u5230\u60A8\u7684\u5E93\u4E2D...";
-        this.startButton.setDisabled(true);
-        this.pauseButton.setDisabled(true);
-        this.stopButton.setDisabled(true);
-        break;
+    }
+  }
+  /**
+   * 更新处理状态（供外部调用）
+   */
+  updateProcessingState(state) {
+    const statusMap = {
+      "saving-audio": {
+        text: "\u4FDD\u5B58\u97F3\u9891...",
+        hint: "\u6B63\u5728\u4FDD\u5B58\u97F3\u9891\u6587\u4EF6\uFF0C\u8BF7\u7A0D\u5019..."
+      },
+      "transcribing": {
+        text: "\u6B63\u5728\u8F6C\u5F55...",
+        hint: "\u6B63\u5728\u5C06\u8BED\u97F3\u8F6C\u6362\u4E3A\u6587\u5B57\uFF0C\u8BF7\u7A0D\u5019..."
+      },
+      "ocr-processing": {
+        text: "\u56FE\u7247\u8BC6\u522B\u4E2D...",
+        hint: "\u6B63\u5728\u8BC6\u522B\u56FE\u7247\u4E2D\u7684\u6587\u5B57\u5185\u5BB9\uFF0C\u8BF7\u7A0D\u5019..."
+      },
+      "processing": {
+        text: "AI\u5904\u7406\u4E2D...",
+        hint: "\u6B63\u5728\u4F7F\u7528AI\u4F18\u5316\u6587\u672C\u5185\u5BB9\u548C\u751F\u6210\u6807\u7B7E\uFF0C\u8BF7\u7A0D\u5019..."
+      },
+      "saving": {
+        text: "\u4FDD\u5B58\u4E2D...",
+        hint: "\u6B63\u5728\u4FDD\u5B58\u7B14\u8BB0\u5230\u60A8\u7684\u5E93\u4E2D..."
+      }
+    };
+    const status = statusMap[state];
+    if (status) {
+      this.statusText.textContent = status.text;
+      this.hintText.textContent = status.hint;
+      this.statusContainer.className = "simple-status status-processing";
     }
   }
   startTimer() {
+    if (this.timerInterval) {
+      clearInterval(this.timerInterval);
+    }
+    let seconds = 0;
     this.timerInterval = window.setInterval(() => {
-      if (this.audioRecorder) {
-        const duration = this.audioRecorder.getRecordingDuration();
-        this.timeDisplay.textContent = this.formatTime(duration);
-      }
-    }, 100);
+      seconds++;
+      const minutes = Math.floor(seconds / 60);
+      const remainingSeconds = seconds % 60;
+      this.timeDisplay.textContent = `${minutes.toString().padStart(2, "0")}:${remainingSeconds.toString().padStart(2, "0")}`;
+    }, 1e3);
   }
-  formatTime(milliseconds) {
-    const totalSeconds = Math.floor(milliseconds / 1e3);
-    const minutes = Math.floor(totalSeconds / 60);
-    const seconds = totalSeconds % 60;
-    return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
-  }
-  // 公共方法：允许外部更新处理状态
-  updateProcessingState(state) {
-    this.setState(state);
-  }
-  /**
-   * 创建图片区域UI - 整合版本
-   */
-  createImageSection(container) {
-    this.imageSection = container.createDiv("image-section");
-    const imageTitle = this.imageSection.createEl("h3", { text: "\u6DFB\u52A0\u56FE\u7247" });
-    imageTitle.addClass("image-section-title");
-    this.imageFileInput = this.imageManager.createFileInput();
-    this.imageSection.appendChild(this.imageFileInput);
-    this.createIntegratedImageArea();
-    this.createProgressAreas();
-    this.setupImageEvents();
-  }
-  /**
-   * 创建整合的图片区域（添加按钮 + 预览区域）
-   */
-  createIntegratedImageArea() {
-    const integratedArea = this.imageSection.createDiv("integrated-image-area");
-    const addButtonArea = integratedArea.createDiv("add-button-area");
-    const addButton = addButtonArea.createEl("button");
-    addButton.addClass("image-add-button");
-    addButton.innerHTML = "\u{1F4F7}<span>+</span>";
-    addButton.title = "\u6DFB\u52A0\u56FE\u7247";
-    addButton.addEventListener("click", () => {
-      this.imageFileInput.click();
-    });
-    this.imageGrid = integratedArea.createDiv("image-preview-area");
-    this.imageGrid.addClass("image-grid", "integrated-grid");
-    const hintText = this.imageSection.createEl("div", {
-      text: "\u70B9\u51FB+\u6DFB\u52A0\u56FE\u7247\uFF0C\u652F\u6301JPG/PNG/GIF/WebP\uFF0C\u6700\u592710MB"
-    });
-    hintText.addClass("image-hint-text");
-    this.imageUploadArea = integratedArea;
-  }
-  /**
-   * 创建进度显示区域
-   */
-  createProgressAreas() {
-    this.imageProgress = this.imageSection.createDiv("image-progress");
-    this.imageProgress.addClass("progress-area");
-    this.imageProgress.addClass("hidden");
-    this.ocrProgress = this.imageSection.createDiv("ocr-progress");
-    this.ocrProgress.addClass("progress-area");
-    this.ocrProgress.addClass("hidden");
-  }
-  /**
-   * 设置图片相关事件
-   */
-  setupImageEvents() {
-    this.imageFileInput.addEventListener("change", async (event) => {
-      const target = event.target;
-      if (target.files && target.files.length > 0) {
-        await this.handleImageFiles(target.files);
-        target.value = "";
-      }
-    });
-    this.setupDragAndDrop();
-  }
-  /**
-   * 设置拖拽功能
-   */
-  setupDragAndDrop() {
-    const uploadArea = this.imageUploadArea;
-    uploadArea.addEventListener("dragenter", (e) => {
-      e.preventDefault();
-      this.imageState.dragActive = true;
-      uploadArea.addClass("drag-active");
-    });
-    uploadArea.addEventListener("dragover", (e) => {
-      e.preventDefault();
-    });
-    uploadArea.addEventListener("dragleave", (e) => {
-      e.preventDefault();
-      if (!uploadArea.contains(e.relatedTarget)) {
-        this.imageState.dragActive = false;
-        uploadArea.removeClass("drag-active");
-      }
-    });
-    uploadArea.addEventListener("drop", async (e) => {
-      var _a;
-      e.preventDefault();
-      this.imageState.dragActive = false;
-      uploadArea.removeClass("drag-active");
-      const files = (_a = e.dataTransfer) == null ? void 0 : _a.files;
-      if (files && files.length > 0) {
-        await this.handleImageFiles(files);
-      }
-    });
-  }
-  /**
-   * 处理选择的图片文件
-   */
-  async handleImageFiles(files) {
-    try {
-      this.showImageProgress("\u6B63\u5728\u6DFB\u52A0\u56FE\u7247...");
-      const result = await this.imageManager.addImagesLegacy(files);
-      if (result.added.length > 0) {
-        this.imageState.images = this.imageManager.getAllImages();
-        this.updateImageGrid();
-        new import_obsidian3.Notice(`\u6210\u529F\u6DFB\u52A0 ${result.added.length} \u5F20\u56FE\u7247`);
-      }
-      if (result.errors.length > 0) {
-        console.error("\u56FE\u7247\u6DFB\u52A0\u9519\u8BEF:", result.errors);
-        new import_obsidian3.Notice(`\u6DFB\u52A0\u56FE\u7247\u65F6\u51FA\u73B0\u9519\u8BEF: ${result.errors.slice(0, 2).join(", ")}`);
-      }
-    } catch (error) {
-      console.error("\u5904\u7406\u56FE\u7247\u6587\u4EF6\u5931\u8D25:", error);
-      new import_obsidian3.Notice("\u6DFB\u52A0\u56FE\u7247\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5");
-    } finally {
-      this.hideImageProgress();
+  stopTimer() {
+    if (this.timerInterval) {
+      clearInterval(this.timerInterval);
+      this.timerInterval = null;
     }
   }
-  /**
-   * 更新图片网格显示
-   */
-  updateImageGrid() {
-    this.imageGrid.empty();
-    if (this.imageState.images.length === 0) {
-      const emptyHint = this.imageGrid.createEl("div", { text: "\u8FD8\u672A\u6DFB\u52A0\u56FE\u7247" });
-      emptyHint.addClass("empty-hint");
-      return;
-    }
-    this.imageState.images.forEach((image) => {
-      const imageItem = this.createImageItem(image);
-      this.imageGrid.appendChild(imageItem);
-    });
-    this.updateImageCount();
-  }
-  /**
-   * 创建单个图片项
-   */
-  createImageItem(image) {
-    const itemEl = document.createElement("div");
-    itemEl.addClass("image-item");
-    itemEl.setAttribute("data-image-id", image.id);
-    const thumbnailContainer = itemEl.createDiv("thumbnail-container");
-    const thumbnail = thumbnailContainer.createEl("img", { attr: { src: image.thumbnailDataUrl } });
-    thumbnail.addClass("thumbnail");
-    thumbnail.alt = image.fileName;
-    const deleteButton = thumbnailContainer.createEl("button");
-    deleteButton.addClass("delete-button");
-    deleteButton.addClass("enhanced-delete");
-    deleteButton.innerHTML = "\u274C";
-    deleteButton.title = "\u5220\u9664\u56FE\u7247";
-    deleteButton.setAttribute("aria-label", "\u5220\u9664\u56FE\u7247");
-    deleteButton.addEventListener("click", (e) => {
-      e.stopPropagation();
-      this.handleImageDelete(image.id, image.fileName);
-    });
-    const infoContainer = itemEl.createDiv("image-info");
-    const fileName = infoContainer.createEl("div", { text: image.fileName });
-    fileName.addClass("file-name");
-    const fileSize = infoContainer.createEl("div", { text: this.formatFileSize(image.fileSize) });
-    fileSize.addClass("file-size");
-    return itemEl;
-  }
-  /**
-   * 处理图片删除 - 增强版本，包含确认对话框
-   */
-  handleImageDelete(imageId, fileName) {
-    const isMobile = window.innerWidth <= 768;
-    const message = isMobile ? `\u5220\u9664\u56FE\u7247"${fileName}"\uFF1F` : `\u786E\u5B9A\u8981\u5220\u9664\u56FE\u7247"${fileName}"\u5417\uFF1F
-
-\u5220\u9664\u540E\u65E0\u6CD5\u6062\u590D\u3002`;
-    const confirmed = confirm(message);
-    if (confirmed) {
-      this.removeImage(imageId);
-    }
-  }
-  /**
-   * 删除图片 - 原有逻辑保持不变
-   */
-  removeImage(imageId) {
-    const removed = this.imageManager.removeImage(imageId);
-    if (removed) {
-      this.imageState.images = this.imageManager.getAllImages();
-      this.updateImageGrid();
-      new import_obsidian3.Notice("\u56FE\u7247\u5DF2\u5220\u9664");
-    }
-  }
-  /**
-   * 显示图片处理进度
-   */
-  showImageProgress(message) {
-    this.imageProgress.removeClass("hidden");
-    this.imageProgress.textContent = message;
-  }
-  /**
-   * 隐藏图片处理进度
-   */
-  hideImageProgress() {
-    this.imageProgress.addClass("hidden");
-  }
-  /**
-   * 显示OCR进度
-   */
-  showOCRProgress(progress) {
-    this.ocrProgress.removeClass("hidden");
-    const progressText = `OCR\u5904\u7406\u4E2D: ${progress.currentFileName} (${progress.currentIndex}/${progress.totalImages})`;
-    this.ocrProgress.textContent = progressText;
-  }
-  /**
-   * 隐藏OCR进度
-   */
-  hideOCRProgress() {
-    this.ocrProgress.addClass("hidden");
-  }
-  /**
-   * 更新图片计数显示
-   */
-  updateImageCount() {
-    const count = this.imageState.images.length;
-    const title = this.imageSection.querySelector(".image-section-title");
-    if (title) {
-      title.textContent = count > 0 ? `\u6DFB\u52A0\u56FE\u7247 (${count})` : "\u6DFB\u52A0\u56FE\u7247";
-    }
-  }
-  /**
-   * 格式化文件大小
-   */
-  formatFileSize(bytes) {
-    if (bytes === 0)
-      return "0 B";
-    const k = 1024;
-    const sizes = ["B", "KB", "MB", "GB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
-  }
-  /**
-   * 获取当前图片列表
-   */
-  getImages() {
-    return this.imageManager.getAllImages();
-  }
-  /**
-   * 清空所有图片
-   */
-  clearImages() {
-    this.imageManager.clearAllImages();
-    this.imageState.images = [];
-    this.updateImageGrid();
-  }
-  /**
-   * 检测是否为iOS设备
-   */
-  detectIOS() {
-    return /iPad|iPhone|iPod/.test(navigator.userAgent);
-  }
-  /**
-   * iOS特定的UI优化
-   */
-  optimizeForIOS() {
-    if (!this.detectIOS())
-      return;
-    this.contentEl.addClass("ios-optimized");
-    const wakeLockSupport = AudioRecorder.checkWakeLockSupport();
-    let hintText = "iOS\u63D0\u793A\uFF1A\u9996\u6B21\u4F7F\u7528\u8BF7\u5728Safari\u8BBE\u7F6E\u4E2D\u5141\u8BB8\u9EA6\u514B\u98CE\u8BBF\u95EE";
-    if (wakeLockSupport.isSupported) {
-      hintText += "\uFF0C\u5F55\u97F3\u65F6\u5C06\u81EA\u52A8\u9632\u6B62\u9501\u5C4F";
-    } else {
-      hintText += "\uFF0C\u5F55\u97F3\u65F6\u8BF7\u4FDD\u6301\u5C4F\u5E55\u5F00\u542F";
-    }
-    const iosHint = this.contentEl.createEl("div", { text: hintText });
-    iosHint.addClass("ios-hint");
-    if (!wakeLockSupport.isSupported) {
-      const warningHint = this.contentEl.createEl("div", {
-        text: "\u26A0\uFE0F " + wakeLockSupport.message
-      });
-      warningHint.addClass("wake-lock-warning");
-    }
-  }
-  /**
-   * 处理Wake Lock状态变化
-   */
-  handleWakeLockChange(isActive, error) {
-    console.log(`Wake Lock\u72B6\u6001\u53D8\u5316: ${isActive ? "\u6FC0\u6D3B" : "\u91CA\u653E"}`, error ? `\u9519\u8BEF: ${error}` : "");
-    if (isActive) {
-      this.wakeLockIndicator.removeClass("hidden");
-      this.wakeLockText.setText("\u9632\u9501\u5C4F\u5DF2\u6FC0\u6D3B");
-      this.wakeLockIndicator.removeClass("wake-lock-error");
-      this.wakeLockIndicator.addClass("wake-lock-active");
-    } else {
-      if (error) {
-        this.wakeLockIndicator.removeClass("hidden");
-        this.wakeLockText.setText(`\u9632\u9501\u5C4F\u5931\u8D25: ${error}`);
-        this.wakeLockIndicator.removeClass("wake-lock-active");
-        this.wakeLockIndicator.addClass("wake-lock-error");
-        if (this.detectIOS()) {
-          this.showWakeLockFallbackHint();
-        }
-      } else {
-        this.wakeLockIndicator.addClass("hidden");
-        this.wakeLockIndicator.removeClass("wake-lock-active", "wake-lock-error");
-      }
-    }
-  }
-  /**
-   * 显示Wake Lock失败后的备用提示
-   */
-  showWakeLockFallbackHint() {
-    const fallbackHint = "\u26A0\uFE0F \u9632\u9501\u5C4F\u529F\u80FD\u4E0D\u53EF\u7528\uFF0C\u5F55\u97F3\u65F6\u8BF7\u624B\u52A8\u4FDD\u6301\u5C4F\u5E55\u5F00\u542F";
-    if (this.state === "recording" || this.state === "paused") {
-      new import_obsidian3.Notice(fallbackHint);
-    }
-    if (this.hintText) {
-      const originalText = this.hintText.textContent || "";
-      if (!originalText.includes("\u8BF7\u624B\u52A8\u4FDD\u6301\u5C4F\u5E55\u5F00\u542F")) {
-        this.hintText.setText(originalText + " (\u5F55\u97F3\u65F6\u8BF7\u624B\u52A8\u4FDD\u6301\u5C4F\u5E55\u5F00\u542F)");
-      }
-    }
-  }
-  /**
-   * 获取Wake Lock状态信息（用于调试）
-   */
-  getWakeLockInfo() {
-    if (!this.audioRecorder) {
-      return "AudioRecorder\u672A\u521D\u59CB\u5316";
-    }
-    const state = this.audioRecorder.getWakeLockState();
-    return `Wake Lock - \u652F\u6301:${state.isSupported}, \u6FC0\u6D3B:${state.isActive}, \u542F\u7528:${state.isEnabled}`;
+  resetUI() {
+    this.setRecordingState("idle");
+    this.timeDisplay.textContent = "00:00";
+    this.images = [];
   }
   /**
    * 紧急关闭方法 - 供外部调用
    */
   emergencyClose() {
-    this.closeReason = "normal";
-    this.close();
+    this.leaf.detach();
   }
 };
 
@@ -4248,9 +3790,7 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
   constructor() {
     super(...arguments);
     this.dashScopeClient = null;
-    this.recordingModal = null;
     this.textProcessor = null;
-    this.closeRibbonIcon = null;
     // 取消状态管理
     this.isProcessingCancelled = false;
   }
@@ -4262,30 +3802,38 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
       new import_obsidian4.Notice("\u5F53\u524D\u6D4F\u89C8\u5668\u4E0D\u652F\u6301\u5F55\u97F3\u529F\u80FD");
       return;
     }
-    this.addRibbonIcon("microphone", "\u6253\u5F00\u5F55\u97F3\u754C\u9762", (evt) => {
-      this.openRecordingModal();
+    this.registerView(
+      VIEW_TYPE_RECORDING,
+      (leaf) => new RecordingView(
+        leaf,
+        this,
+        (audioBlob, images) => this.handleMultimodalData(audioBlob, images),
+        (error) => this.handleRecordingError(error),
+        this.settings.enableLLMProcessing,
+        this.settings.enableImageOCR,
+        () => this.handleRecordingCancel(),
+        this.settings.enableWakeLock
+      )
+    );
+    this.addRibbonIcon("microphone", "\u6253\u5F00\u5F55\u97F3\u754C\u9762", () => {
+      this.openRecordingView();
     });
-    const closeRibbonIcon = this.addRibbonIcon("square", "\u5173\u95ED\u5F55\u97F3\u754C\u9762", (evt) => {
-      this.closeRecordingGracefully();
-    });
-    closeRibbonIcon.style.display = "none";
-    this.closeRibbonIcon = closeRibbonIcon;
     this.addCommand({
-      id: "open-recording-modal",
-      name: "\u6253\u5F00\u5F55\u97F3\u754C\u9762",
+      id: "open-recording-view",
+      name: "GetNote: \u6253\u5F00\u5F55\u97F3\u754C\u9762",
       callback: () => {
-        this.openRecordingModal();
+        this.openRecordingView();
       }
     });
     this.addCommand({
-      id: "close-recording",
+      id: "close-recording-view",
       name: "GetNote: \u5173\u95ED\u5F55\u97F3\u754C\u9762",
       hotkeys: [{ modifiers: ["Mod"], key: "Escape" }],
       checkCallback: (checking) => {
-        const hasActiveRecording = this.recordingModal !== null;
-        if (hasActiveRecording) {
+        const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_RECORDING);
+        if (leaves.length > 0) {
           if (!checking) {
-            this.closeRecordingGracefully();
+            leaves[0].detach();
           }
           return true;
         }
@@ -4303,77 +3851,58 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
   }
   onunload() {
     this.isProcessingCancelled = true;
-    if (this.recordingModal) {
-      this.recordingModal.close();
-      this.recordingModal = null;
-    }
-    this.hideCloseRibbonIcon();
-    this.closeRibbonIcon = null;
+    const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_RECORDING);
+    leaves.forEach((leaf) => leaf.detach());
   }
   /**
-   * 显示关闭录音界面按钮
+   * 打开录音视图
    */
-  showCloseRibbonIcon() {
-    if (this.closeRibbonIcon) {
-      this.closeRibbonIcon.style.display = "";
+  openRecordingView() {
+    if (!this.settings.apiKey) {
+      new import_obsidian4.Notice("\u8BF7\u5148\u5728\u8BBE\u7F6E\u4E2D\u914D\u7F6EAPI Key");
+      return;
     }
+    if (!this.dashScopeClient) {
+      new import_obsidian4.Notice("API\u5BA2\u6237\u7AEF\u672A\u521D\u59CB\u5316\uFF0C\u8BF7\u68C0\u67E5\u8BBE\u7F6E");
+      return;
+    }
+    this.isProcessingCancelled = false;
+    const existingLeaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_RECORDING);
+    if (existingLeaves.length > 0) {
+      this.app.workspace.revealLeaf(existingLeaves[0]);
+      return;
+    }
+    const leaf = this.app.workspace.getRightLeaf(false);
+    leaf.setViewState({
+      type: VIEW_TYPE_RECORDING,
+      active: true
+    });
   }
   /**
-   * 隐藏关闭录音界面按钮
-   */
-  hideCloseRibbonIcon() {
-    if (this.closeRibbonIcon) {
-      this.closeRibbonIcon.style.display = "none";
-    }
-  }
-  /**
-   * 优雅关闭录音界面 - 主要的关闭方法
-   */
-  closeRecordingGracefully() {
-    console.log("[CLOSE] \u6267\u884C\u4F18\u96C5\u5173\u95ED\u5F55\u97F3\u754C\u9762");
-    if (this.recordingModal) {
-      try {
-        this.recordingModal.close();
-        new import_obsidian4.Notice("\u6B63\u5728\u5173\u95ED\u5F55\u97F3\u754C\u9762...");
-      } catch (error) {
-        console.error("[CLOSE] \u4F18\u96C5\u5173\u95ED\u5931\u8D25\uFF0C\u5C1D\u8BD5\u7D27\u6025\u5173\u95ED:", error);
-        this.emergencyCloseRecording();
-      }
-    } else {
-      new import_obsidian4.Notice("\u6CA1\u6709\u6D3B\u8DC3\u7684\u5F55\u97F3\u754C\u9762\u9700\u8981\u5173\u95ED");
-    }
-  }
-  /**
-   * 紧急关闭录音界面 - 用于iPhone调试和故障恢复
+   * 紧急关闭录音界面 - 用于调试和故障恢复
    */
   emergencyCloseRecording() {
     console.log("[EMERGENCY] \u6267\u884C\u7D27\u6025\u5173\u95ED\u5F55\u97F3\u754C\u9762");
-    if (this.recordingModal) {
+    const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_RECORDING);
+    if (leaves.length > 0) {
       try {
-        this.recordingModal.emergencyClose();
+        leaves.forEach((leaf) => {
+          const view = leaf.view;
+          if (view && typeof view.emergencyClose === "function") {
+            view.emergencyClose();
+          } else {
+            leaf.detach();
+          }
+        });
         new import_obsidian4.Notice("\u5DF2\u5F3A\u5236\u5173\u95ED\u5F55\u97F3\u754C\u9762");
       } catch (error) {
         console.error("[EMERGENCY] \u7D27\u6025\u5173\u95ED\u5931\u8D25:", error);
         new import_obsidian4.Notice("\u7D27\u6025\u5173\u95ED\u5931\u8D25\uFF0C\u8BF7\u5237\u65B0\u9875\u9762");
-      } finally {
-        this.recordingModal = null;
-        this.hideCloseRibbonIcon();
       }
     } else {
       new import_obsidian4.Notice("\u6CA1\u6709\u627E\u5230\u6D3B\u8DC3\u7684\u5F55\u97F3\u754C\u9762");
     }
     this.isProcessingCancelled = true;
-    try {
-      const overlays = document.querySelectorAll('.modal, [style*="z-index: 10000"]');
-      overlays.forEach((overlay, index) => {
-        if (overlay.parentNode) {
-          console.log(`[EMERGENCY] \u79FB\u9664\u8986\u76D6\u5C42 ${index + 1}:`, overlay);
-          overlay.parentNode.removeChild(overlay);
-        }
-      });
-    } catch (error) {
-      console.error("[EMERGENCY] \u6E05\u7406\u8986\u76D6\u5C42\u65F6\u51FA\u9519:", error);
-    }
   }
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -4394,27 +3923,6 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
       });
     }
   }
-  openRecordingModal() {
-    if (!this.settings.apiKey) {
-      new import_obsidian4.Notice("\u8BF7\u5148\u5728\u8BBE\u7F6E\u4E2D\u914D\u7F6EAPI Key");
-      return;
-    }
-    if (!this.dashScopeClient) {
-      new import_obsidian4.Notice("API\u5BA2\u6237\u7AEF\u672A\u521D\u59CB\u5316\uFF0C\u8BF7\u68C0\u67E5\u8BBE\u7F6E");
-      return;
-    }
-    this.isProcessingCancelled = false;
-    this.recordingModal = new RecordingModal(
-      this.app,
-      (audioBlob, images) => this.handleMultimodalData(audioBlob, images),
-      (error) => this.handleRecordingError(error),
-      this.settings.enableLLMProcessing,
-      this.settings.enableImageOCR,
-      () => this.handleRecordingCancel()
-    );
-    this.recordingModal.open();
-    this.showCloseRibbonIcon();
-  }
   async handleMultimodalData(audioBlob, images) {
     const processingStartTime = Date.now();
     this.isProcessingCancelled = false;
@@ -4433,8 +3941,12 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
       let audioMetadata = {};
       if (this.settings.keepOriginalAudio && hasAudio) {
         try {
-          if (this.recordingModal) {
-            this.recordingModal.updateProcessingState("saving-audio");
+          const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_RECORDING);
+          if (leaves.length > 0) {
+            const view = leaves[0].view;
+            if (view instanceof RecordingView) {
+              view.updateProcessingState("saving-audio");
+            }
           }
           new import_obsidian4.Notice("\u6B63\u5728\u4FDD\u5B58\u97F3\u9891\u6587\u4EF6...");
           const tempFileName = this.noteGenerator.generateFileName("\u591A\u6A21\u6001\u7B14\u8BB0", new Date());
@@ -4458,8 +3970,11 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
       }
       let transcribedText = "";
       if (hasAudio) {
-        if (this.recordingModal) {
-          this.recordingModal.updateProcessingState("transcribing");
+        if (this.app.workspace.getLeavesOfType(VIEW_TYPE_RECORDING).length > 0) {
+          const view = this.app.workspace.getLeavesOfType(VIEW_TYPE_RECORDING)[0].view;
+          if (view) {
+            view.updateProcessingState("transcribing");
+          }
         }
         new import_obsidian4.Notice("\u6B63\u5728\u8C03\u7528AI\u8F6C\u5F55\u97F3\u9891...");
         transcribedText = await this.dashScopeClient.processAudio(audioBlob);
@@ -4470,8 +3985,11 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
       let ocrResults = /* @__PURE__ */ new Map();
       let totalOCRText = "";
       if (hasImages && this.settings.enableImageOCR) {
-        if (this.recordingModal) {
-          this.recordingModal.updateProcessingState("ocr-processing");
+        if (this.app.workspace.getLeavesOfType(VIEW_TYPE_RECORDING).length > 0) {
+          const view = this.app.workspace.getLeavesOfType(VIEW_TYPE_RECORDING)[0].view;
+          if (view) {
+            view.updateProcessingState("ocr-processing");
+          }
         }
         new import_obsidian4.Notice(`\u6B63\u5728\u8BC6\u522B${images.length}\u5F20\u56FE\u7247\u4E2D\u7684\u6587\u5B57...`);
         const ocrPromises = images.map(async (image) => {
@@ -4522,8 +4040,11 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
       };
       let multimodalResult;
       if ((this.settings.enableLLMProcessing || hasImages && this.settings.combineAudioAndOCR) && this.textProcessor) {
-        if (this.recordingModal) {
-          this.recordingModal.updateProcessingState("processing");
+        if (this.app.workspace.getLeavesOfType(VIEW_TYPE_RECORDING).length > 0) {
+          const view = this.app.workspace.getLeavesOfType(VIEW_TYPE_RECORDING)[0].view;
+          if (view) {
+            view.updateProcessingState("processing");
+          }
         }
         new import_obsidian4.Notice("\u6B63\u5728\u4F7F\u7528AI\u5904\u7406\u591A\u6A21\u6001\u5185\u5BB9...");
         multimodalResult = await this.textProcessor.processMultimodalContent(multimodalContent);
@@ -4562,8 +4083,11 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
           new import_obsidian4.Notice("\u4FDD\u5B58\u56FE\u7247\u5931\u8D25\uFF0C\u4F46\u4F1A\u7EE7\u7EED\u751F\u6210\u7B14\u8BB0");
         }
       }
-      if (this.recordingModal) {
-        this.recordingModal.updateProcessingState("saving");
+      if (this.app.workspace.getLeavesOfType(VIEW_TYPE_RECORDING).length > 0) {
+        const view = this.app.workspace.getLeavesOfType(VIEW_TYPE_RECORDING)[0].view;
+        if (view) {
+          view.updateProcessingState("saving");
+        }
       }
       if (this.isProcessingCancelled) {
         return;
@@ -4618,44 +4142,16 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
         console.error("\u4FDD\u5B58\u7B14\u8BB0\u65F6\u51FA\u9519:", saveError);
         new import_obsidian4.Notice(`\u4FDD\u5B58\u7B14\u8BB0\u5931\u8D25: ${saveError.message}`);
       }
-      this.recordingModal = null;
-      this.hideCloseRibbonIcon();
     } catch (error) {
       console.error("\u5904\u7406\u591A\u6A21\u6001\u5185\u5BB9\u65F6\u51FA\u9519:", error);
       new import_obsidian4.Notice(`\u5904\u7406\u591A\u6A21\u6001\u5185\u5BB9\u65F6\u51FA\u9519: ${error.message}`);
       this.isProcessingCancelled = true;
-      if (this.recordingModal) {
-        try {
-          this.recordingModal.close();
-        } catch (modalError) {
-          console.error("\u9519\u8BEF\u5904\u7406\u671F\u95F4\u5173\u95EDModal\u5931\u8D25:", modalError);
-        } finally {
-          this.recordingModal = null;
-          this.hideCloseRibbonIcon();
-        }
-      } else {
-        this.recordingModal = null;
-        this.hideCloseRibbonIcon();
-      }
     }
   }
   handleRecordingError(error) {
     console.error("\u5F55\u97F3\u9519\u8BEF:", error);
     new import_obsidian4.Notice(`\u5F55\u97F3\u51FA\u9519: ${error.message}`);
     this.isProcessingCancelled = true;
-    if (this.recordingModal) {
-      try {
-        this.recordingModal.close();
-      } catch (modalError) {
-        console.error("\u5173\u95EDModal\u65F6\u51FA\u9519:", modalError);
-      } finally {
-        this.recordingModal = null;
-        this.hideCloseRibbonIcon();
-      }
-    } else {
-      this.recordingModal = null;
-      this.hideCloseRibbonIcon();
-    }
   }
   handleRecordingCancel() {
     if (this.isProcessingCancelled) {
@@ -4663,10 +4159,6 @@ var GetNotePlugin = class extends import_obsidian4.Plugin {
     }
     this.isProcessingCancelled = true;
     new import_obsidian4.Notice("\u5F55\u97F3\u5DF2\u53D6\u6D88");
-    if (this.recordingModal) {
-      this.recordingModal = null;
-      this.hideCloseRibbonIcon();
-    }
   }
   /**
    * 合并音频和OCR文字

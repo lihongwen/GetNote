@@ -63,9 +63,14 @@
 }
 
 /* 基础样式重置 - Obsidian标准化 */
-.recording-modal {
+.recording-modal, .getnote-recording-view {
     max-width: 400px;
     margin: 0 auto;
+}
+
+/* 视图特定样式 */
+.getnote-recording-view .view-content {
+    padding: 0;
 }
 
 /* 主容器 - 使用Obsidian标准样式 */
