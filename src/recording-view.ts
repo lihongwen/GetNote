@@ -2,7 +2,7 @@ import { ItemView, WorkspaceLeaf, ButtonComponent, Notice } from 'obsidian';
 import GetNotePlugin from '../main';
 import { AudioRecorder } from './recorder';
 import { ImageManager, ImageItem } from './image-manager';
-import { ExtendedRecordingState } from './types';
+import { ExtendedRecordingState, ImageComponentState } from './types';
 
 export const VIEW_TYPE_RECORDING = 'getnote-recording-view';
 
@@ -26,6 +26,14 @@ export class RecordingView extends ItemView {
     private stopButton: ButtonComponent;
     private hintText: HTMLElement;
     
+    // 图片相关UI元素
+    private imageSection: HTMLElement;
+    private imageUploadArea: HTMLElement;
+    private imageGrid: HTMLElement;
+    private imageFileInput: HTMLInputElement;
+    private imageProgress: HTMLElement;
+    private ocrProgress: HTMLElement;
+    
     // Callbacks
     private onRecordingComplete: (audioBlob: Blob, images?: ImageItem[]) => Promise<void>;
     private onError: (error: Error) => void;
@@ -36,8 +44,16 @@ export class RecordingView extends ItemView {
     private enableImageOCR: boolean = false;
     private enableWakeLock: boolean = true;
     
-    // 图片状态
-    private images: ImageItem[] = [];
+    // 图片组件状态
+    private imageState: ImageComponentState = {
+        images: [],
+        selectedImages: new Set(),
+        dragActive: false,
+        uploadProgress: new Map(),
+        ocrProgress: null,
+        showPreview: false,
+        previewImageId: null
+    };
 
     constructor(
         leaf: WorkspaceLeaf, 
@@ -131,6 +147,11 @@ export class RecordingView extends ItemView {
         this.hintText = container.createEl('div', { text: hintText });
         this.hintText.addClass('simple-hint');
         
+        // 图片区域 (仅在启用OCR时显示)
+        if (this.enableImageOCR) {
+            this.createImageSection(container);
+        }
+        
         // 设置初始状态
         this.updateUI();
     }
@@ -153,7 +174,7 @@ export class RecordingView extends ItemView {
         }
 
         // 清理图片资源
-        this.images.forEach(image => {
+        this.imageState.images.forEach(image => {
             if (image.thumbnailDataUrl && image.thumbnailDataUrl.startsWith('blob:')) {
                 URL.revokeObjectURL(image.thumbnailDataUrl);
             }
@@ -161,7 +182,7 @@ export class RecordingView extends ItemView {
                 URL.revokeObjectURL(image.originalDataUrl);
             }
         });
-        this.images = [];
+        this.imageState.images = [];
     }
 
     private async handleStart(): Promise<void> {
@@ -220,7 +241,7 @@ export class RecordingView extends ItemView {
                 setTimeout(async () => {
                     // 这里我们需要获取录音数据
                     // 由于 AudioRecorder 设计的限制，我们通过插件直接处理
-                    await this.onRecordingComplete(new Blob(), this.images.length > 0 ? this.images : undefined);
+                    await this.onRecordingComplete(new Blob(), this.imageState.images.length > 0 ? this.imageState.images : undefined);
                 }, 100);
                 
                 this.setRecordingState('idle');
@@ -330,7 +351,325 @@ export class RecordingView extends ItemView {
     private resetUI(): void {
         this.setRecordingState('idle');
         this.timeDisplay.textContent = '00:00';
-        this.images = [];
+        // 注意：不清空图片，让用户可以在多次录音中重复使用
+    }
+
+    // ====== 图片相关方法 ======
+    
+    /**
+     * 创建图片区域
+     */
+    private createImageSection(container: HTMLElement): void {
+        this.imageSection = container.createDiv('image-section');
+        
+        // 标题和图片计数
+        const titleContainer = this.imageSection.createDiv('image-section-title-container');
+        const titleContent = titleContainer.createDiv('image-section-title-content');
+        
+        const title = titleContent.createEl('h3', { text: '添加图片' });
+        title.addClass('image-section-title');
+        
+        const imageCount = titleContent.createEl('span', { text: `(${this.imageState.images.length})` });
+        imageCount.addClass('image-count');
+        
+        // 创建整合的图片区域
+        this.createIntegratedImageArea();
+        
+        // 创建进度显示区域
+        this.createProgressAreas();
+        
+        // 设置图片事件
+        this.setupImageEvents();
+    }
+
+    /**
+     * 创建整合的图片区域（添加按钮 + 预览区域）
+     */
+    private createIntegratedImageArea(): void {
+        // 主容器
+        const integratedArea = this.imageSection.createDiv('integrated-image-area');
+        
+        // 添加按钮区域
+        const addButtonArea = integratedArea.createDiv('add-button-area');
+        const addButton = addButtonArea.createEl('button');
+        addButton.addClass('image-add-button');
+        addButton.innerHTML = '📷<span>+</span>';
+        addButton.title = '添加图片';
+        addButton.addEventListener('click', () => {
+            this.imageFileInput.click();
+        });
+        
+        // 图片预览区域
+        this.imageGrid = integratedArea.createDiv('image-preview-area');
+        this.imageGrid.addClass('image-grid', 'integrated-grid');
+        
+        // 底部提示文字
+        const hintText = this.imageSection.createEl('div', { 
+            text: '点击+添加图片，支持JPG/PNG/GIF/WebP，最大10MB' 
+        });
+        hintText.addClass('image-hint-text');
+        
+        // 隐藏的文件输入
+        this.imageFileInput = this.imageSection.createEl('input', {
+            type: 'file',
+            attr: { 
+                accept: 'image/*', 
+                multiple: 'true',
+                style: 'display: none;'
+            }
+        }) as HTMLInputElement;
+        
+        // 保持拖拽功能，将整个区域设为拖拽目标
+        this.imageUploadArea = integratedArea; // 复用原有的拖拽区域变量
+        
+        // 初始化图片网格
+        this.updateImageGrid();
+    }
+
+    /**
+     * 创建进度显示区域
+     */
+    private createProgressAreas(): void {
+        // 上传进度
+        this.imageProgress = this.imageSection.createDiv('image-progress');
+        this.imageProgress.addClass('progress-area');
+        this.imageProgress.addClass('hidden');
+        
+        // OCR进度
+        this.ocrProgress = this.imageSection.createDiv('ocr-progress');
+        this.ocrProgress.addClass('progress-area');
+        this.ocrProgress.addClass('hidden');
+    }
+
+    /**
+     * 设置图片相关事件
+     */
+    private setupImageEvents(): void {
+        // 文件选择事件
+        this.imageFileInput.addEventListener('change', async (event) => {
+            const target = event.target as HTMLInputElement;
+            if (target.files && target.files.length > 0) {
+                await this.handleImageFiles(target.files);
+                target.value = ''; // 清空输入，允许重复选择同一文件
+            }
+        });
+
+        // 拖拽事件
+        this.setupDragAndDrop();
+    }
+
+    /**
+     * 设置拖拽功能
+     */
+    private setupDragAndDrop(): void {
+        const uploadArea = this.imageUploadArea;
+
+        uploadArea.addEventListener('dragenter', (e) => {
+            e.preventDefault();
+            this.imageState.dragActive = true;
+            uploadArea.addClass('drag-active');
+        });
+
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+        });
+
+        uploadArea.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            if (!uploadArea.contains(e.relatedTarget as Node)) {
+                this.imageState.dragActive = false;
+                uploadArea.removeClass('drag-active');
+            }
+        });
+
+        uploadArea.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            this.imageState.dragActive = false;
+            uploadArea.removeClass('drag-active');
+            
+            const files = e.dataTransfer?.files;
+            if (files && files.length > 0) {
+                await this.handleImageFiles(files);
+            }
+        });
+    }
+
+    /**
+     * 处理选择的图片文件
+     */
+    private async handleImageFiles(files: FileList): Promise<void> {
+        try {
+            this.showImageProgress('正在添加图片...');
+            
+            const result = await this.imageManager.addImagesLegacy(files);
+            
+            // 更新图片状态
+            this.imageState.images.push(...result.added);
+            
+            // 更新UI
+            this.updateImageGrid();
+            this.updateImageCount();
+            
+            if (result.errors.length > 0) {
+                const errorMessage = `添加了 ${result.added.length} 张图片，${result.errors.length} 张失败`;
+                new Notice(errorMessage);
+                console.warn('图片添加错误:', result.errors);
+            } else {
+                new Notice(`成功添加 ${result.added.length} 张图片`);
+            }
+            
+        } catch (error) {
+            console.error('处理图片文件失败:', error);
+            new Notice(`添加图片失败: ${error.message}`);
+        } finally {
+            this.hideImageProgress();
+        }
+    }
+
+    /**
+     * 更新图片网格显示
+     */
+    private updateImageGrid(): void {
+        this.imageGrid.empty();
+        
+        if (this.imageState.images.length === 0) {
+            const emptyHint = this.imageGrid.createEl('div', { text: '还未添加图片' });
+            emptyHint.addClass('image-empty-hint');
+            return;
+        }
+        
+        // 渲染图片项
+        this.imageState.images.forEach((image, index) => {
+            this.renderImageItem(image, index);
+        });
+    }
+
+    /**
+     * 渲染单个图片项
+     */
+    private renderImageItem(image: ImageItem, index: number): void {
+        const itemEl = this.imageGrid.createDiv('image-item');
+        itemEl.dataset.imageId = image.id;
+        
+        // 缩略图容器
+        const thumbnailContainer = itemEl.createDiv('image-thumbnail-container');
+        
+        // 缩略图
+        const thumbnail = thumbnailContainer.createEl('img');
+        thumbnail.className = 'image-thumbnail';
+        thumbnail.src = image.thumbnailDataUrl;
+        thumbnail.alt = image.fileName;
+        
+        // 删除按钮 - 增强版
+        const deleteBtn = thumbnailContainer.createDiv('image-delete-btn');
+        deleteBtn.innerHTML = '❌';
+        deleteBtn.title = '删除图片';
+        deleteBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.showImageDeleteConfirmation(image.id, image.fileName);
+        });
+        
+        // 图片信息
+        const infoContainer = itemEl.createDiv('image-info');
+        const fileName = infoContainer.createEl('div', { text: image.fileName });
+        fileName.className = 'image-filename';
+        const fileSize = infoContainer.createEl('div', { text: this.formatFileSize(image.fileSize) });
+        fileSize.className = 'image-filesize';
+        
+        // 点击预览（可选实现）
+        itemEl.addEventListener('click', () => {
+            this.previewImage(image);
+        });
+    }
+
+    /**
+     * 显示删除确认对话框
+     */
+    private showImageDeleteConfirmation(imageId: string, fileName: string): void {
+        const message = `确定要删除图片 "${fileName}" 吗？此操作无法撤销。`;
+        
+        if (confirm(message)) {
+            this.removeImage(imageId);
+        }
+    }
+
+    /**
+     * 移除图片
+     */
+    private removeImage(imageId: string): void {
+        const index = this.imageState.images.findIndex(img => img.id === imageId);
+        if (index !== -1) {
+            const image = this.imageState.images[index];
+            
+            // 释放 blob URLs
+            if (image.thumbnailDataUrl && image.thumbnailDataUrl.startsWith('blob:')) {
+                URL.revokeObjectURL(image.thumbnailDataUrl);
+            }
+            if (image.originalDataUrl && image.originalDataUrl.startsWith('blob:')) {
+                URL.revokeObjectURL(image.originalDataUrl);
+            }
+            
+            // 从数组中移除
+            this.imageState.images.splice(index, 1);
+            this.imageState.selectedImages.delete(imageId);
+            
+            // 更新UI
+            this.updateImageGrid();
+            this.updateImageCount();
+            
+            new Notice(`图片 "${image.fileName}" 已删除`);
+        }
+    }
+
+    /**
+     * 更新图片计数显示
+     */
+    private updateImageCount(): void {
+        const countEl = this.imageSection.querySelector('.image-count') as HTMLElement;
+        if (countEl) {
+            countEl.textContent = `(${this.imageState.images.length})`;
+        }
+    }
+
+    /**
+     * 预览图片（简单实现）
+     */
+    private previewImage(image: ImageItem): void {
+        new Notice(`预览图片: ${image.fileName}`);
+        // 这里可以扩展为完整的图片预览功能
+    }
+
+    /**
+     * 格式化文件大小
+     */
+    private formatFileSize(bytes: number): string {
+        if (bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+
+    /**
+     * 显示图片处理进度
+     */
+    private showImageProgress(message: string): void {
+        this.imageProgress.textContent = message;
+        this.imageProgress.removeClass('hidden');
+    }
+
+    /**
+     * 隐藏图片处理进度
+     */
+    private hideImageProgress(): void {
+        this.imageProgress.addClass('hidden');
+    }
+
+    /**
+     * 获取当前所有图片
+     */
+    public getImages(): ImageItem[] {
+        return this.imageState.images;
     }
 
     /**

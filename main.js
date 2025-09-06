@@ -3559,8 +3559,16 @@ var RecordingView = class extends import_obsidian3.ItemView {
     this.enableLLMProcessing = false;
     this.enableImageOCR = false;
     this.enableWakeLock = true;
-    // 图片状态
-    this.images = [];
+    // 图片组件状态
+    this.imageState = {
+      images: [],
+      selectedImages: /* @__PURE__ */ new Set(),
+      dragActive: false,
+      uploadProgress: /* @__PURE__ */ new Map(),
+      ocrProgress: null,
+      showPreview: false,
+      previewImageId: null
+    };
     this.plugin = plugin;
     this.onRecordingComplete = onRecordingComplete;
     this.onError = onError;
@@ -3606,6 +3614,9 @@ var RecordingView = class extends import_obsidian3.ItemView {
     const hintText = this.enableLLMProcessing ? "\u70B9\u51FB\u5F00\u59CB\u5F55\u97F3\uFF0C\u5B8C\u6210\u540E\u5C06\u8FDB\u884CAI\u8F6C\u5F55\u548C\u6587\u672C\u4F18\u5316" : "\u70B9\u51FB\u5F00\u59CB\u5F55\u97F3\uFF0C\u5F55\u97F3\u5B8C\u6210\u540E\u5C06\u81EA\u52A8\u8F6C\u6362\u4E3A\u6587\u5B57\u7B14\u8BB0";
     this.hintText = container.createEl("div", { text: hintText });
     this.hintText.addClass("simple-hint");
+    if (this.enableImageOCR) {
+      this.createImageSection(container);
+    }
     this.updateUI();
   }
   async onClose() {
@@ -3620,7 +3631,7 @@ var RecordingView = class extends import_obsidian3.ItemView {
       clearInterval(this.timerInterval);
       this.timerInterval = null;
     }
-    this.images.forEach((image) => {
+    this.imageState.images.forEach((image) => {
       if (image.thumbnailDataUrl && image.thumbnailDataUrl.startsWith("blob:")) {
         URL.revokeObjectURL(image.thumbnailDataUrl);
       }
@@ -3628,7 +3639,7 @@ var RecordingView = class extends import_obsidian3.ItemView {
         URL.revokeObjectURL(image.originalDataUrl);
       }
     });
-    this.images = [];
+    this.imageState.images = [];
   }
   async handleStart() {
     try {
@@ -3677,7 +3688,7 @@ var RecordingView = class extends import_obsidian3.ItemView {
         const originalRecorder = this.audioRecorder;
         originalRecorder.stopRecording();
         setTimeout(async () => {
-          await this.onRecordingComplete(new Blob(), this.images.length > 0 ? this.images : void 0);
+          await this.onRecordingComplete(new Blob(), this.imageState.images.length > 0 ? this.imageState.images : void 0);
         }, 100);
         this.setRecordingState("idle");
         this.stopTimer();
@@ -3775,7 +3786,246 @@ var RecordingView = class extends import_obsidian3.ItemView {
   resetUI() {
     this.setRecordingState("idle");
     this.timeDisplay.textContent = "00:00";
-    this.images = [];
+  }
+  // ====== 图片相关方法 ======
+  /**
+   * 创建图片区域
+   */
+  createImageSection(container) {
+    this.imageSection = container.createDiv("image-section");
+    const titleContainer = this.imageSection.createDiv("image-section-title-container");
+    const titleContent = titleContainer.createDiv("image-section-title-content");
+    const title = titleContent.createEl("h3", { text: "\u6DFB\u52A0\u56FE\u7247" });
+    title.addClass("image-section-title");
+    const imageCount = titleContent.createEl("span", { text: `(${this.imageState.images.length})` });
+    imageCount.addClass("image-count");
+    this.createIntegratedImageArea();
+    this.createProgressAreas();
+    this.setupImageEvents();
+  }
+  /**
+   * 创建整合的图片区域（添加按钮 + 预览区域）
+   */
+  createIntegratedImageArea() {
+    const integratedArea = this.imageSection.createDiv("integrated-image-area");
+    const addButtonArea = integratedArea.createDiv("add-button-area");
+    const addButton = addButtonArea.createEl("button");
+    addButton.addClass("image-add-button");
+    addButton.innerHTML = "\u{1F4F7}<span>+</span>";
+    addButton.title = "\u6DFB\u52A0\u56FE\u7247";
+    addButton.addEventListener("click", () => {
+      this.imageFileInput.click();
+    });
+    this.imageGrid = integratedArea.createDiv("image-preview-area");
+    this.imageGrid.addClass("image-grid", "integrated-grid");
+    const hintText = this.imageSection.createEl("div", {
+      text: "\u70B9\u51FB+\u6DFB\u52A0\u56FE\u7247\uFF0C\u652F\u6301JPG/PNG/GIF/WebP\uFF0C\u6700\u592710MB"
+    });
+    hintText.addClass("image-hint-text");
+    this.imageFileInput = this.imageSection.createEl("input", {
+      type: "file",
+      attr: {
+        accept: "image/*",
+        multiple: "true",
+        style: "display: none;"
+      }
+    });
+    this.imageUploadArea = integratedArea;
+    this.updateImageGrid();
+  }
+  /**
+   * 创建进度显示区域
+   */
+  createProgressAreas() {
+    this.imageProgress = this.imageSection.createDiv("image-progress");
+    this.imageProgress.addClass("progress-area");
+    this.imageProgress.addClass("hidden");
+    this.ocrProgress = this.imageSection.createDiv("ocr-progress");
+    this.ocrProgress.addClass("progress-area");
+    this.ocrProgress.addClass("hidden");
+  }
+  /**
+   * 设置图片相关事件
+   */
+  setupImageEvents() {
+    this.imageFileInput.addEventListener("change", async (event) => {
+      const target = event.target;
+      if (target.files && target.files.length > 0) {
+        await this.handleImageFiles(target.files);
+        target.value = "";
+      }
+    });
+    this.setupDragAndDrop();
+  }
+  /**
+   * 设置拖拽功能
+   */
+  setupDragAndDrop() {
+    const uploadArea = this.imageUploadArea;
+    uploadArea.addEventListener("dragenter", (e) => {
+      e.preventDefault();
+      this.imageState.dragActive = true;
+      uploadArea.addClass("drag-active");
+    });
+    uploadArea.addEventListener("dragover", (e) => {
+      e.preventDefault();
+    });
+    uploadArea.addEventListener("dragleave", (e) => {
+      e.preventDefault();
+      if (!uploadArea.contains(e.relatedTarget)) {
+        this.imageState.dragActive = false;
+        uploadArea.removeClass("drag-active");
+      }
+    });
+    uploadArea.addEventListener("drop", async (e) => {
+      var _a;
+      e.preventDefault();
+      this.imageState.dragActive = false;
+      uploadArea.removeClass("drag-active");
+      const files = (_a = e.dataTransfer) == null ? void 0 : _a.files;
+      if (files && files.length > 0) {
+        await this.handleImageFiles(files);
+      }
+    });
+  }
+  /**
+   * 处理选择的图片文件
+   */
+  async handleImageFiles(files) {
+    try {
+      this.showImageProgress("\u6B63\u5728\u6DFB\u52A0\u56FE\u7247...");
+      const result = await this.imageManager.addImagesLegacy(files);
+      this.imageState.images.push(...result.added);
+      this.updateImageGrid();
+      this.updateImageCount();
+      if (result.errors.length > 0) {
+        const errorMessage = `\u6DFB\u52A0\u4E86 ${result.added.length} \u5F20\u56FE\u7247\uFF0C${result.errors.length} \u5F20\u5931\u8D25`;
+        new import_obsidian3.Notice(errorMessage);
+        console.warn("\u56FE\u7247\u6DFB\u52A0\u9519\u8BEF:", result.errors);
+      } else {
+        new import_obsidian3.Notice(`\u6210\u529F\u6DFB\u52A0 ${result.added.length} \u5F20\u56FE\u7247`);
+      }
+    } catch (error) {
+      console.error("\u5904\u7406\u56FE\u7247\u6587\u4EF6\u5931\u8D25:", error);
+      new import_obsidian3.Notice(`\u6DFB\u52A0\u56FE\u7247\u5931\u8D25: ${error.message}`);
+    } finally {
+      this.hideImageProgress();
+    }
+  }
+  /**
+   * 更新图片网格显示
+   */
+  updateImageGrid() {
+    this.imageGrid.empty();
+    if (this.imageState.images.length === 0) {
+      const emptyHint = this.imageGrid.createEl("div", { text: "\u8FD8\u672A\u6DFB\u52A0\u56FE\u7247" });
+      emptyHint.addClass("image-empty-hint");
+      return;
+    }
+    this.imageState.images.forEach((image, index) => {
+      this.renderImageItem(image, index);
+    });
+  }
+  /**
+   * 渲染单个图片项
+   */
+  renderImageItem(image, index) {
+    const itemEl = this.imageGrid.createDiv("image-item");
+    itemEl.dataset.imageId = image.id;
+    const thumbnailContainer = itemEl.createDiv("image-thumbnail-container");
+    const thumbnail = thumbnailContainer.createEl("img");
+    thumbnail.className = "image-thumbnail";
+    thumbnail.src = image.thumbnailDataUrl;
+    thumbnail.alt = image.fileName;
+    const deleteBtn = thumbnailContainer.createDiv("image-delete-btn");
+    deleteBtn.innerHTML = "\u274C";
+    deleteBtn.title = "\u5220\u9664\u56FE\u7247";
+    deleteBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.showImageDeleteConfirmation(image.id, image.fileName);
+    });
+    const infoContainer = itemEl.createDiv("image-info");
+    const fileName = infoContainer.createEl("div", { text: image.fileName });
+    fileName.className = "image-filename";
+    const fileSize = infoContainer.createEl("div", { text: this.formatFileSize(image.fileSize) });
+    fileSize.className = "image-filesize";
+    itemEl.addEventListener("click", () => {
+      this.previewImage(image);
+    });
+  }
+  /**
+   * 显示删除确认对话框
+   */
+  showImageDeleteConfirmation(imageId, fileName) {
+    const message = `\u786E\u5B9A\u8981\u5220\u9664\u56FE\u7247 "${fileName}" \u5417\uFF1F\u6B64\u64CD\u4F5C\u65E0\u6CD5\u64A4\u9500\u3002`;
+    if (confirm(message)) {
+      this.removeImage(imageId);
+    }
+  }
+  /**
+   * 移除图片
+   */
+  removeImage(imageId) {
+    const index = this.imageState.images.findIndex((img) => img.id === imageId);
+    if (index !== -1) {
+      const image = this.imageState.images[index];
+      if (image.thumbnailDataUrl && image.thumbnailDataUrl.startsWith("blob:")) {
+        URL.revokeObjectURL(image.thumbnailDataUrl);
+      }
+      if (image.originalDataUrl && image.originalDataUrl.startsWith("blob:")) {
+        URL.revokeObjectURL(image.originalDataUrl);
+      }
+      this.imageState.images.splice(index, 1);
+      this.imageState.selectedImages.delete(imageId);
+      this.updateImageGrid();
+      this.updateImageCount();
+      new import_obsidian3.Notice(`\u56FE\u7247 "${image.fileName}" \u5DF2\u5220\u9664`);
+    }
+  }
+  /**
+   * 更新图片计数显示
+   */
+  updateImageCount() {
+    const countEl = this.imageSection.querySelector(".image-count");
+    if (countEl) {
+      countEl.textContent = `(${this.imageState.images.length})`;
+    }
+  }
+  /**
+   * 预览图片（简单实现）
+   */
+  previewImage(image) {
+    new import_obsidian3.Notice(`\u9884\u89C8\u56FE\u7247: ${image.fileName}`);
+  }
+  /**
+   * 格式化文件大小
+   */
+  formatFileSize(bytes) {
+    if (bytes === 0)
+      return "0 B";
+    const k = 1024;
+    const sizes = ["B", "KB", "MB", "GB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+  }
+  /**
+   * 显示图片处理进度
+   */
+  showImageProgress(message) {
+    this.imageProgress.textContent = message;
+    this.imageProgress.removeClass("hidden");
+  }
+  /**
+   * 隐藏图片处理进度
+   */
+  hideImageProgress() {
+    this.imageProgress.addClass("hidden");
+  }
+  /**
+   * 获取当前所有图片
+   */
+  getImages() {
+    return this.imageState.images;
   }
   /**
    * 紧急关闭方法 - 供外部调用
